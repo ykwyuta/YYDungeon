@@ -90,6 +90,20 @@ pub(crate) fn viewport(pw: u32, ph: u32) -> (f32, u32, u32) {
     )
 }
 
+fn health_bar(g: &Gfx, rect: Rect, hp: f32, max_hp: f32, ink: Color) {
+    rect.fill(g, rgb(0x080c12));
+    let ratio = (hp / max_hp).clamp(0.0, 1.0);
+    if ratio > 0.0 {
+        Rect::new(
+            rect.x + 1.0,
+            rect.y + 1.0,
+            (rect.w - 2.0) * ratio,
+            rect.h - 2.0,
+        )
+        .fill(g, ink);
+    }
+}
+
 struct Grid {
     rect: Rect,
     size: f32,
@@ -839,7 +853,26 @@ impl View<'_> {
                         } else {
                             1.0
                         };
-                        self.art.draw_monster(g, id, rect.inset(3.0), alpha);
+                        let in_combat = self.live()
+                            && self
+                                .game
+                                .invaders()
+                                .iter()
+                                .any(|invader| invader.cell == cell && invader.fighting());
+                        let body = rect.inset(3.0);
+                        let sprite = if in_combat {
+                            Rect::new(body.x, body.y, body.w * 0.61, body.h - 4.0)
+                        } else {
+                            Rect::new(body.x, body.y, body.w, body.h - 4.0)
+                        };
+                        self.art.draw_monster(g, id, sprite, alpha);
+                        health_bar(
+                            g,
+                            Rect::new(rect.x + 2.0, rect.y + rect.h - 5.0, rect.w - 4.0, 5.0),
+                            hp as f32,
+                            MONSTERS[id as usize].hp as f32,
+                            TEAL,
+                        );
                         TEAL
                     } else {
                         let (sprite, ink) = match site {
@@ -851,13 +884,15 @@ impl View<'_> {
                         self.art.draw(g, sprite, rect.inset(3.0), 1.0);
                         ink
                     };
-                    Rect::new(
-                        rect.x + rect.w * 0.27,
-                        rect.y + rect.h - 4.0,
-                        rect.w * 0.46,
-                        2.0,
-                    )
-                    .fill(g, ink);
+                    if site.monster().is_none() {
+                        Rect::new(
+                            rect.x + rect.w * 0.27,
+                            rect.y + rect.h - 4.0,
+                            rect.w * 0.46,
+                            2.0,
+                        )
+                        .fill(g, ink);
+                    }
                 }
                 if self.selected == Some(cell) {
                     rect.inset(1.0).edge(g, GOLD);
@@ -872,23 +907,53 @@ impl View<'_> {
                 Rect::new(rect.x + 2.0, rect.y + 2.0, 12.0, 13.0).label(g, "×", Font::Small, RED);
             }
             for (index, invader) in self.game.invaders().iter().enumerate() {
-                let mut rect = grid.cell(invader.cell).inset(2.0);
-                rect.x += (index % 3) as f32 * 2.0 - 2.0;
-                self.art.draw_adventurer(g, invader.class, rect);
-                Rect::new(rect.x, rect.y, rect.w, 3.0).fill(g, INSET);
-                Rect::new(
-                    rect.x,
-                    rect.y,
-                    rect.w * invader.hp as f32 / invader.max_hp as f32,
-                    3.0,
-                )
-                .fill(g, RED);
-                Rect::new(rect.x, rect.y + 3.0, 22.0, 14.0).label(
+                let tile = grid.cell(invader.cell);
+                let tile_mates = self.game.invaders();
+                let same_cell = |other: &&crate::dungeon::Invader| other.cell == invader.cell;
+                let side = tile_mates
+                    .iter()
+                    .any(|other| other.cell == invader.cell && other.fighting());
+                let stack = tile_mates[..index].iter().filter(same_cell).count();
+                let lanes = tile_mates.iter().filter(same_cell).count() as f32;
+                let available = tile.w * if side { 0.43 } else { 1.0 };
+                let left = tile.x + tile.w - available;
+                let lane = available / lanes;
+                let sprite = if side {
+                    Rect::new(
+                        left + stack as f32 * lane * 0.35,
+                        tile.y + 5.0,
+                        available * 0.82,
+                        tile.h - 11.0,
+                    )
+                } else {
+                    Rect::new(
+                        tile.x + 2.0 + stack as f32 * lane * 0.45,
+                        tile.y + 5.0,
+                        (tile.w - 4.0) / lanes.sqrt(),
+                        tile.h - 9.0,
+                    )
+                };
+                self.art.draw_adventurer(g, invader.class, sprite);
+                health_bar(
                     g,
-                    &invader.level.to_string(),
-                    Font::Small,
-                    TEXT,
+                    Rect::new(
+                        tile.x + stack as f32 * tile.w / lanes,
+                        tile.y,
+                        tile.w / lanes,
+                        5.0,
+                    ),
+                    invader.hp as f32,
+                    invader.max_hp as f32,
+                    RED,
                 );
+                if lanes == 1.0 && !side {
+                    Rect::new(tile.x + 2.0, tile.y + 5.0, 20.0, 13.0).label(
+                        g,
+                        &invader.level.to_string(),
+                        Font::Small,
+                        TEXT,
+                    );
+                }
             }
             if let Some((cell, time)) = self.working {
                 let mut rect = grid.cell(cell).inset(4.0);
@@ -916,7 +981,10 @@ impl View<'_> {
                     Some(Site::Chest { rarity }) => format!("宝箱・{}", RARITIES[rarity as usize]),
                     Some(site) if site.monster().is_some() => {
                         let (id, hp) = site.monster().unwrap();
-                        format!("{}　体力 {}", MONSTERS[id as usize].name, hp)
+                        format!(
+                            "{}　HP {}/{}",
+                            MONSTERS[id as usize].name, hp, MONSTERS[id as usize].hp
+                        )
                     }
                     Some(site) => site.order().name().into(),
                     None if cell == ENTRY => "入口".into(),
@@ -1257,7 +1325,7 @@ impl View<'_> {
             for (i, (title, detail)) in [
                 ("建設", "右の指示を選び、迷路の区画を押すとゴブリンが作業します。分岐や回り道を掘ると、図鑑から新しい魔物を配置できます。"),
                 ("おびき寄せる", "宝箱が多いほど冒険者が増えます。レアな品を入れると、強敵と引き換えに撃退報酬が増えます。"),
-                ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨、死体の骨材、持ち物を回収します。玉座の主が倒されると陥落します。"),
+                ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨と資材を回収します。HPは魔物が青緑、冒険者が赤です。玉座の主が倒されると陥落します。"),
                 ("拡張と委任", "撃退で迷路・建設予算・配置枠が増えます。新しい階へ移ると、前の階を中ボスに任せられます。一定レベル以上の敵は新しい階まで来ます。"),
             ].into_iter().enumerate() {
                 let y = 236.0 + 78.0 * i as f32;

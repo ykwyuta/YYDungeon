@@ -236,3 +236,35 @@ fn smaller_raids_rotate_through_each_rank_including_its_leader() {
         assert_eq!(strongest_class(level), expected.end - 1);
     }
 }
+
+#[test]
+fn melee_paces_attacks_and_preserves_health_when_resuming_mid_fight() {
+    let mut game = Game::new();
+    let goblin = Cell { x: 2, y: 4 };
+    game.begin_raid();
+    while !game.invaders()[0].fighting() {
+        game.tick(0.25);
+    }
+    let enemy_hp = game.invaders()[0].hp;
+    assert_eq!(game.invaders()[0].cell, goblin);
+    assert_eq!(
+        game.floor().site(goblin).unwrap().monster(),
+        Some((GOBLIN, 38))
+    );
+    let mut restored = Game::load(&game.save()).unwrap();
+
+    for game in [&mut game, &mut restored] {
+        game.tick(0.25);
+        assert_eq!(game.invaders()[0].hp, enemy_hp);
+        for _ in 0..2 {
+            game.tick(0.25);
+        }
+        assert!(game.invaders()[0].fighting());
+        assert_eq!(game.invaders()[0].cell, goblin);
+        assert!(game.invaders()[0].hp < enemy_hp);
+        assert!(game.floor().site(goblin).unwrap().monster().unwrap().1 < 38);
+    }
+    assert_eq!(game.save(), restored.save());
+    settle(&mut restored);
+    assert_eq!(restored.kills, 3);
+}

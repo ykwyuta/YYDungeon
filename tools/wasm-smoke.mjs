@@ -6,11 +6,18 @@ const decoder = new TextDecoder();
 let wasm;
 let draws = 0;
 let sprites = 0;
+const gaugeColors = new Set();
 const labels = new Set();
 const env = {
   canvas_begin() {},
   canvas_origin() {},
-  canvas_rect() { draws++; },
+  canvas_rect(_x, _y, width, height, stroke, red, green, blue) {
+    draws++;
+    if (width > 0 && height === 3 && stroke === 0) {
+      const hex = [red, green, blue].map(channel => Math.round(channel * 255).toString(16).padStart(2, "0")).join("");
+      gaugeColors.add(hex);
+    }
+  },
   canvas_circle() {},
   canvas_text(ptr, len) { labels.add(decoder.decode(new Uint8Array(wasm.memory.buffer, ptr, len))); },
   canvas_bitmap() { return ++sprites; },
@@ -63,13 +70,23 @@ assert.equal(game().wave, 1);
 wasm.yy_event(0, 151, 352);
 wasm.yy_frame(0, 1);
 assert.ok([...labels].some(label => label.includes("チンピラ") && label.includes("HP")));
-for (let i = 0; i < 140 && game().raid; i++) wasm.yy_frame(0.25, 1);
+let fightFrames = 0;
+for (let i = 0; i < 200 && game().raid; i++) {
+  gaugeColors.clear();
+  wasm.yy_frame(0.25, 1);
+  if (game().raid?.invaders.some(invader => invader.encounter)) {
+    fightFrames++;
+    assert.ok(gaugeColors.has("81c9b6") && gaugeColors.has("f39682"));
+  }
+}
+assert.ok(fightFrames >= 5);
 const played = game();
 assert.equal(played.raid, null);
 assert.equal(played.kills, 3);
 assert.ok(played.boss > 0);
 
-const saved = new Uint8Array(wasm.memory.buffer, wasm.yy_save_ptr(), wasm.yy_save_size()).slice();
+const saveSize = wasm.yy_save_size();
+const saved = new Uint8Array(wasm.memory.buffer, wasm.yy_save_ptr(), saveSize).slice();
 const loadPtr = wasm.yy_load_buffer(saved.length);
 new Uint8Array(wasm.memory.buffer, loadPtr, saved.length).set(saved);
 wasm.yy_init(1240, 780);

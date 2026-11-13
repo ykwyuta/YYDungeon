@@ -10,6 +10,10 @@ pub const THRONE: Cell = Cell { x: 11, y: 5 };
 pub const PREPARE: f32 = 42.0;
 pub const MAX_FLOORS: usize = 100;
 const STEP: f32 = 0.33;
+const COMBAT_ROUNDS: u8 = 3;
+const COMBAT_INTERVAL: u8 = 2;
+const SPIKE_DAMAGE: i32 = 7;
+const FROST_DAMAGE: i32 = 5;
 const RAID_MAX: usize = 32;
 
 fn missing_development() -> u32 {
@@ -126,11 +130,11 @@ impl Order {
         match self {
             Self::Inspect => "床や壁を選ぶと、その区画の情報を確認できます。",
             Self::Chest => "宝箱が多いほど、次の襲撃に来る冒険者が増えます。",
-            Self::Goblin => "通過する冒険者を攻撃します。交戦で消耗します。",
+            Self::Goblin => "通路で冒険者を足止めし、数回攻防します。",
             Self::Bestiary => "迷路を掘って、新しい魔物を仲間にできます。",
             Self::Recruit(_) => "空いている通路を選ぶと、仲間を配置します。",
-            Self::Spikes => "踏んだ冒険者に12ダメージを与えます。",
-            Self::Frost => "8ダメージを与え、冒険者を2手止めます。",
+            Self::Spikes => "踏んだ冒険者に7ダメージを与えます。",
+            Self::Frost => "5ダメージを与え、冒険者を2手止めます。",
             Self::Dig => "通路に接した内壁を掘り、迷路に新しい道を作ります。",
             Self::Remove => "設置物を撤去して、配置枠を空けます。",
         }
@@ -404,6 +408,12 @@ impl Floor {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+struct Encounter {
+    rounds: u8,
+    delay: u8,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Invader {
     pub level: u8,
     pub hp: i32,
@@ -415,9 +425,17 @@ pub struct Invader {
     freeze: u8,
     #[serde(default)]
     poison: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    encounter: Option<Encounter>,
     chest: Option<Cell>,
     looted: bool,
     fought: Vec<Cell>,
+}
+
+impl Invader {
+    pub fn fighting(&self) -> bool {
+        self.encounter.is_some()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -843,19 +861,59 @@ impl Game {
             step: 0,
             freeze: 0,
             poison: 0,
+            encounter: None,
             chest,
             looted: false,
             fought: Vec::new(),
         });
     }
 
+    fn fight(&mut self, invader: &mut Invader, mut encounter: Encounter) -> Option<Encounter> {
+        let (hp, monster) = self.active().sites[invader.cell.index()]
+            .as_mut()?
+            .monster_hp_mut()?;
+        if *hp == 0 {
+            return None;
+        }
+        if encounter.delay > 1 {
+            encounter.delay -= 1;
+            return Some(encounter);
+        }
+
+        let adventurer = &ADVENTURERS[invader.class as usize];
+        let mut retaliation = (6 + 3 * invader.level as u16 + adventurer.retaliation).div_ceil(3);
+        let mut damage = (monster.damage.min(8 + *hp as i32) + 1) / 2;
+        if encounter.rounds == COMBAT_ROUNDS {
+            match monster.tactic {
+                Tactic::Ambush if invader.hp == invader.max_hp => damage += 8,
+                Tactic::Venom => invader.poison = invader.poison.max(3 - adventurer.resist),
+                Tactic::Snare => {
+                    retaliation = retaliation.saturating_sub(2 - u16::from(adventurer.resist))
+                }
+                _ => {}
+            }
+        }
+        if monster.tactic == Tactic::Guard {
+            retaliation = retaliation.div_ceil(2);
+        }
+        invader.hp -= damage;
+        *hp = hp.saturating_sub(retaliation);
+        encounter.rounds -= 1;
+        encounter.delay = COMBAT_INTERVAL;
+        (invader.hp > 0 && *hp > 0 && encounter.rounds > 0).then_some(encounter)
+    }
+
     fn move_invader(&mut self, invader: &mut Invader) -> bool {
         if invader.poison > 0 {
             invader.poison -= 1;
-            invader.hp -= 4;
+            invader.hp -= 3;
             if invader.hp <= 0 {
                 return false;
             }
+        }
+        if let Some(encounter) = invader.encounter.take() {
+            invader.encounter = self.fight(invader, encounter);
+            return invader.hp > 0;
         }
         if invader.freeze > 0 {
             invader.freeze -= 1;
@@ -868,37 +926,17 @@ impl Game {
         let cell = invader.cell;
         let adventurer = &ADVENTURERS[invader.class as usize];
         if !invader.fought.contains(&cell) {
-            match &mut self.active().sites[cell.index()] {
-                Some(Site::Spikes) => invader.hp -= 12 - adventurer.trap_armor,
+            match self.floor().site(cell) {
+                Some(Site::Spikes) => invader.hp -= SPIKE_DAMAGE - adventurer.trap_armor,
                 Some(Site::Frost) => {
-                    invader.hp -= 8 - adventurer.trap_armor;
+                    invader.hp -= FROST_DAMAGE - adventurer.trap_armor;
                     invader.freeze = 2 - adventurer.resist;
                 }
-                Some(site) => {
-                    if let Some((hp, monster)) = site.monster_hp_mut() {
-                        if *hp > 0 {
-                            let retaliation = 6 + 3 * invader.level as u16 + adventurer.retaliation;
-                            let bonus = match monster.tactic {
-                                Tactic::Ambush if invader.hp == invader.max_hp => 10,
-                                Tactic::Venom => {
-                                    invader.poison = invader.poison.max(3 - adventurer.resist);
-                                    0
-                                }
-                                Tactic::Snare => {
-                                    invader.freeze = 2 - adventurer.resist;
-                                    0
-                                }
-                                _ => 0,
-                            };
-                            invader.hp -= monster.damage.min(8 + *hp as i32) + bonus;
-                            let damage = if monster.tactic == Tactic::Guard {
-                                retaliation.div_ceil(2)
-                            } else {
-                                retaliation
-                            };
-                            *hp = hp.saturating_sub(damage);
-                        }
-                    }
+                Some(site) if site.monster().is_some_and(|(_, hp)| hp > 0) => {
+                    invader.encounter = Some(Encounter {
+                        rounds: COMBAT_ROUNDS,
+                        delay: COMBAT_INTERVAL,
+                    });
                 }
                 _ => {}
             }
@@ -1090,6 +1128,15 @@ impl Game {
                         })
                     && invader.fought.len() <= WIDTH * HEIGHT
                     && invader.poison <= 3
+                    && invader.encounter.as_ref().is_none_or(|fight| {
+                        (1..=COMBAT_ROUNDS).contains(&fight.rounds)
+                            && (1..=COMBAT_INTERVAL).contains(&fight.delay)
+                            && invader.fought.contains(&invader.cell)
+                            && self
+                                .floor()
+                                .site(invader.cell)
+                                .is_some_and(Site::is_monster)
+                    })
             })
     }
 }
