@@ -10,6 +10,10 @@ pub const ENTRY: Cell = Cell { x: 0, y: 3 };
 pub const THRONE: Cell = Cell { x: 11, y: 5 };
 pub const PREPARE: f32 = 42.0;
 pub const MAX_FLOORS: usize = 100;
+pub const FLOOR_DEVELOPMENT_GOAL: u32 = 24;
+pub const FLOOR_GOLD_COST: u32 = 100;
+pub const FLOOR_BONE_COST: u32 = 6;
+const RAID_RECOVERY_GOLD: u32 = 10;
 const STEP: f32 = 0.33;
 const COMBAT_ROUNDS: u8 = 3;
 const COMBAT_INTERVAL: u8 = 2;
@@ -112,7 +116,7 @@ impl Order {
     pub fn price(self) -> u32 {
         match self {
             Self::Inspect | Self::Remove => 0,
-            Self::Chest => 30,
+            Self::Chest => 20,
             Self::Goblin => 28,
             Self::Bestiary => 0,
             Self::Recruit(id) => MONSTERS[id as usize].gold,
@@ -404,11 +408,24 @@ impl Floor {
         })
     }
 
+    pub fn development(&self, depth: usize) -> u32 {
+        let mut natural = Self::new(depth);
+        while natural.tier < self.tier {
+            natural.expand();
+        }
+        self.complexity().saturating_sub(natural.complexity())
+    }
+
     fn complexity(&self) -> u32 {
         let mut rooms = 0;
         let mut edges = 0;
         let mut branches = 0;
-        for (index, open) in self.open.iter().enumerate() {
+        // Built rocks temporarily close corridors. Count them as previously excavated.
+        let mut excavated = self.open.clone();
+        for rock in &self.placed_rocks {
+            excavated[rock.index()] = true;
+        }
+        for (index, open) in excavated.iter().enumerate() {
             if !open {
                 continue;
             }
@@ -416,7 +433,10 @@ impl Floor {
                 x: index % WIDTH,
                 y: index / WIDTH,
             };
-            let degree = cell.neighbors().filter(|&next| self.open(next)).count() as u32;
+            let degree = cell
+                .neighbors()
+                .filter(|&next| excavated[next.index()])
+                .count() as u32;
             rooms += 1;
             edges += degree;
             branches += degree.saturating_sub(2);
@@ -735,26 +755,41 @@ impl Game {
         });
         (
             (1 + 2 * count).min(RAID_MAX),
-            (1 + best * 2 + (self.wave / 4).min(6) as u8).min(15),
+            1 + best * 2 + self.local_raid_rank(),
         )
     }
 
+    fn local_raid_rank(&self) -> u8 {
+        (self.floor().earned / 8).min(2) as u8
+    }
+
+    pub fn descent_blocker(&self) -> Option<&'static str> {
+        let floor = self.floor();
+        if self.defeated || self.running() {
+            Some("新フロアは襲撃と襲撃の間に掘れます。")
+        } else if self.floors.len() >= MAX_FLOORS {
+            Some("これ以上深いフロアは掘れません。")
+        } else if floor.tier < 3 || floor.earned < floor.next_goal() {
+            Some("今の階を規模3まで拡張し、その階で冒険者を20人撃退してください。")
+        } else if floor.development(self.floors.len() - 1) < FLOOR_DEVELOPMENT_GOAL {
+            Some("今の階で内壁を掘り、開発24に達すると次の階を掘れます。")
+        } else if self.gold < FLOOR_GOLD_COST || self.bones < FLOOR_BONE_COST {
+            Some("新フロアには金貨100・骨材6が必要です。")
+        } else {
+            None
+        }
+    }
+
     pub fn can_descend(&self) -> bool {
-        !self.defeated
-            && !self.running()
-            && self.floors.len() < MAX_FLOORS
-            && self.floor().tier == 3
-            && self.floor().earned >= 20
-            && self.gold >= 140
-            && self.bones >= 8
+        self.descent_blocker().is_none()
     }
 
     pub fn descend(&mut self, steward: bool) -> Result<(), &'static str> {
-        if !self.can_descend() {
-            return Err("撃退20・フロア規模3・金貨140・骨材8が必要です。");
+        if let Some(reason) = self.descent_blocker() {
+            return Err(reason);
         }
-        self.gold -= 140;
-        self.bones -= 8;
+        self.gold -= FLOOR_GOLD_COST;
+        self.bones -= FLOOR_BONE_COST;
         self.active().steward = steward;
         self.floors.push(Floor::new(self.floors.len()));
         self.boss = self.max_boss();
@@ -813,16 +848,17 @@ impl Game {
         if self.defeated {
             return;
         }
+        self.gold += RAID_RECOVERY_GOLD;
         let before = self.max_boss();
         while self.floor().tier < 3 && self.floor().earned >= self.floor().next_goal() {
             self.active().expand();
             self.gold += 40;
             self.message("撃退数が増え、ゴブリンが迷宮を拡張しました。建設予算 +40");
         }
-        self.boss = (self.boss + self.max_boss() - before + 8).min(self.max_boss());
+        self.boss = (self.boss + self.max_boss() - before + 14).min(self.max_boss());
         self.countdown = PREPARE;
         self.message(format!(
-            "第{}波を防衛。ゴブリンが罠と守備隊を整えます。",
+            "第{}波が終了。守備隊を整えます。復旧費 +{RAID_RECOVERY_GOLD}金貨",
             self.wave
         ));
     }
@@ -835,7 +871,7 @@ impl Game {
         if count == 0 {
             return;
         }
-        let rank = (self.wave / 4).min(6) as u8;
+        let rank = self.local_raid_rank();
         self.wave += 1;
         self.paused = false;
         self.countdown = 0.0;
@@ -857,7 +893,13 @@ impl Game {
             } else {
                 best.saturating_sub((index % 3) as u8).max(1 + rank)
             };
-            let class = raid_class(level, self.wave, index, index + 1 == count);
+            let leader = index + 1 == count;
+            let class = raid_class(level, self.wave, index, leader);
+            // The leader always reaches the active floor so delegating does not stall development.
+            if leader {
+                waiting.push_back((level, class));
+                continue;
+            }
             let mut captured = false;
             for (depth, budget) in budgets.iter_mut().enumerate().take(self.floors.len() - 1) {
                 let floor = &self.floors[depth];
@@ -1109,15 +1151,13 @@ impl Game {
             for mut invader in std::mem::take(&mut raid.invaders) {
                 if self.move_invader(&mut invader) {
                     survivors.push(invader);
-                } else if !self.defeated {
-                    if invader.hp <= 0 {
-                        if raid.fallen.len() < RAID_MAX {
-                            raid.fallen.push(invader.cell);
-                        }
+                } else if self.defeated {
+                    break;
+                } else if invader.hp <= 0 {
+                    if raid.fallen.len() < RAID_MAX {
+                        raid.fallen.push(invader.cell);
                     }
                     self.reward(invader.level, self.floors.len() - 1, invader.class);
-                } else {
-                    break;
                 }
             }
             raid.invaders = survivors;
@@ -1156,13 +1196,7 @@ impl Game {
                 .floors
                 .iter()
                 .enumerate()
-                .map(|(depth, floor)| {
-                    let mut natural = Floor::new(depth);
-                    while natural.tier < floor.tier {
-                        natural.expand();
-                    }
-                    floor.complexity().saturating_sub(natural.complexity())
-                })
+                .map(|(depth, floor)| floor.development(depth))
                 .sum();
         }
         if version != 1 || !game.valid() {

@@ -49,6 +49,7 @@ wasm.yy_frame(0, 1);
 assert.equal(wasm.yy_can_autosave(), 1);
 assert.equal(game().wave, 0);
 assert.ok(draws > 100);
+assert.ok([...labels].some(label => label.includes("この階の開発 0/24")));
 
 wasm.yy_event(2, 51, 0); // 3 opens the monster roster.
 wasm.yy_frame(0, 1);

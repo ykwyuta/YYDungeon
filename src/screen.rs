@@ -1,5 +1,6 @@
 use crate::adventurers::{strongest_class, ADVENTURERS, ADVENTURER_ART};
 use crate::dungeon::{Cell, Floor, Game, Order, Site, ENTRY, RARITIES, THRONE};
+use crate::dungeon::{FLOOR_BONE_COST, FLOOR_DEVELOPMENT_GOAL, FLOOR_GOLD_COST};
 use crate::gfx::{Bitmap, Font, Gfx};
 use crate::monsters::{GOBLIN, MONSTERS, MONSTER_ART, SENTINEL};
 
@@ -494,7 +495,9 @@ impl Screen {
                     self.notify(error);
                 }
             } else {
-                self.notify("新階層には撃退20・規模3・金貨140・骨材8が必要です。");
+                if let Some(reason) = self.game.descent_blocker() {
+                    self.notify(reason);
+                }
             }
         } else if HEAL.has(x, y) && self.live() {
             if let Err(error) = self.game.heal() {
@@ -1208,18 +1211,16 @@ impl View<'_> {
         LOG.panel(g, PANEL, EDGE);
         Rect::new(43.0, 667.0, 103.0, 23.0).label(g, "工房日誌", Font::Normal, GOLD);
         let floor = self.floor();
-        let expansion = if floor.tier < 3 {
-            "規模拡張"
-        } else {
-            "新フロア"
-        };
-        Rect::new(597.0, 668.0, 217.0, 22.0).label(
+        let development = floor.development(self.floor);
+        Rect::new(277.0, 668.0, 536.0, 22.0).label(
             g,
             &format!(
-                "{}まで　撃退 {}/{}",
-                expansion,
+                "規模 {}/3　撃退 {}/{}　この階の開発 {}/{}",
+                floor.tier,
                 floor.earned(),
-                floor.next_goal()
+                floor.next_goal(),
+                development,
+                FLOOR_DEVELOPMENT_GOAL,
             ),
             Font::Small,
             TEAL,
@@ -1339,7 +1340,7 @@ impl View<'_> {
                 ("建設", "右の指示を選び、迷路の区画を押すとゴブリンが作業します。分岐や回り道を掘ると、図鑑から新しい魔物を配置できます。"),
                 ("おびき寄せる", "宝箱を置くと冒険者が来ます。箱が多いほど人数が増え、レアな品には強敵が来ます。開けられた箱は消えます。冒険者は罠や魔物を避けて進みます。"),
                 ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨と資材を回収します。HPは魔物が青緑、冒険者が赤です。玉座の主が倒されると陥落します。"),
-                ("拡張と委任", "撃退で迷路・建設予算・配置枠が増えます。新しい階へ移ると、前の階を中ボスに任せられます。一定レベル以上の敵は新しい階まで来ます。"),
+                ("拡張と委任", "撃退で迷路と配置枠が広がります。規模3、撃退20、階の開発24で次の階を掘れます。前の階を中ボスに任せられます。"),
             ].into_iter().enumerate() {
                 let y = 236.0 + 78.0 * i as f32;
                 Rect::new(308.0, y, 617.0, 22.0).label(g, title, Font::Normal, GOLD);
@@ -1355,7 +1356,7 @@ impl View<'_> {
         }
         Rect::new(283.0, 258.0, 674.0, 268.0).panel(g, PANEL, GOLD);
         let (title, detail) = match overlay {
-            Overlay::Descend => ("新しいフロア", format!("金貨140と骨材8を使い、地下{}階を掘ります。前の階を任せると中ボスが迎撃し、Lv.{}以上の冒険者は次の階へ通します。", self.game.floors.len() + 1, self.floor().pass_level())),
+            Overlay::Descend => ("新しいフロア", format!("金貨{FLOOR_GOLD_COST}と骨材{FLOOR_BONE_COST}を使い、地下{}階を掘ります。前の階を任せると中ボスが迎撃し、Lv.{}以上の冒険者は次の階へ通します。", self.game.floors.len() + 1, self.floor().pass_level())),
             Overlay::Reset => ("最初から始める", "現在の迷宮と進行記録を消去して、地下1階から始めます。".into()),
             Overlay::Defeat => ("迷宮陥落", format!("氷の主が倒されました。第{}波・累計撃退{}人・地下{}階", self.game.wave, self.game.kills, self.game.floors.len())),
             Overlay::Help | Overlay::Bestiary(_) => unreachable!(),

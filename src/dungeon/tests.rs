@@ -10,6 +10,20 @@ fn settle(game: &mut Game) {
     panic!("raid did not settle");
 }
 
+fn develop_current_floor(game: &mut Game) {
+    let (w, h) = game.floor().size();
+    let depth = game.floors.len() - 1;
+    for y in 1..h - 1 {
+        for x in 1..w - 1 {
+            if game.floor().development(depth) >= FLOOR_DEVELOPMENT_GOAL {
+                return;
+            }
+            let _ = game.place(Order::Dig, Cell { x, y }, 0);
+        }
+    }
+    assert!(game.floor().development(depth) >= FLOOR_DEVELOPMENT_GOAL);
+}
+
 #[test]
 fn timer_starts_a_raid_and_the_original_defenses_pay_out() {
     let mut game = Game::new();
@@ -54,6 +68,7 @@ fn maze_expansion_and_delegation_keep_a_route_to_the_throne() {
     assert!(game.floor().route(ENTRY, Cell { x: 15, y: 11 }).is_some());
     assert!(game.floor().monster_limit() > 3 && game.floor().chest_limit() > 2);
     game.place(Order::Chest, Cell { x: 10, y: 7 }, 3).unwrap();
+    develop_current_floor(&mut game);
     game.descend(true).unwrap();
     game.active().expand();
     game.active().expand();
@@ -73,12 +88,14 @@ fn a_steward_stops_weak_invaders_upstairs() {
         game.reward(1, 0, 0);
     }
     game.finish_raid();
+    develop_current_floor(&mut game);
     game.descend(false).unwrap();
     game.toggle_steward(0).unwrap();
     game.place(Order::Chest, Cell { x: 10, y: 7 }, 0).unwrap();
     game.begin_raid();
     assert!(game.floors[0].earned() > 20);
     assert_eq!(game.floor().earned(), 0);
+    assert!(game.running(), "the leader still reaches the active floor");
 }
 
 #[test]
@@ -123,21 +140,23 @@ fn construction_checks_walls_resources_and_running_raids() {
 fn a_prepared_first_floor_can_earn_and_open_the_second_floor() {
     let mut game = Game::new();
     game.place(Order::Wall, Cell { x: 1, y: 1 }, 0).unwrap();
-    game.place(Order::Spikes, Cell { x: 2, y: 5 }, 0).unwrap();
-    game.place(Order::Spikes, Cell { x: 3, y: 5 }, 0).unwrap();
-    game.place(Order::Goblin, Cell { x: 4, y: 5 }, 0).unwrap();
-    game.place(Order::Chest, Cell { x: 9, y: 7 }, 0).unwrap();
-    for _ in 0..7 {
-        for x in [9, 10] {
-            let cell = Cell { x, y: 7 };
-            if game.floor().site(cell).is_none() {
-                game.place(Order::Chest, cell, 0).unwrap();
-            }
+    game.place(Order::Goblin, Cell { x: 2, y: 4 }, 0).unwrap();
+    game.place(Order::Goblin, Cell { x: 2, y: 5 }, 0).unwrap();
+    for _ in 0..12 {
+        let cell = Cell { x: 10, y: 7 };
+        if game.floor().site(cell).is_none() {
+            game.place(Order::Chest, cell, 0).unwrap();
+        }
+        if game.boss + 30 <= game.max_boss() && game.bones >= 2 {
+            game.heal().unwrap();
         }
         game.begin_raid();
         settle(&mut game);
-        assert!(!game.defeated);
-        if game.can_descend() {
+        assert!(!game.defeated, "wave {}, kills {}", game.wave, game.kills);
+        if game.floor().earned() >= 20 {
+            assert!(!game.can_descend());
+            develop_current_floor(&mut game);
+            assert!(game.can_descend());
             game.descend(true).unwrap();
             assert_eq!(game.floors.len(), 2);
             assert!(game.floors[0].steward);
@@ -311,6 +330,10 @@ fn opening_the_last_chest_stops_new_raids_until_it_is_replaced() {
     let mut game = Game::load(&game.save()).unwrap();
     settle(&mut game);
     assert!(!game.defeated);
+    assert_eq!(game.kills, 0);
+    assert_eq!(game.bones, 0);
+    assert_eq!(game.loot, 0);
+    assert_eq!(game.gold, 170 + RAID_RECOVERY_GOLD);
     game.begin_raid();
     for _ in 0..(PREPARE * 4.0) as usize + 4 {
         game.tick(0.25);
@@ -416,4 +439,33 @@ fn adventurers_choose_safe_detours_but_can_cross_unavoidable_defenses() {
         floor.adventurer_route(trap, goal).unwrap(),
         [trap, monster, goal]
     );
+}
+
+#[test]
+fn new_floor_requires_its_own_development_and_resets_raid_pressure() {
+    let mut game = Game::new();
+    game.wave = 80;
+    for _ in 0..20 {
+        game.reward(1, 0, 0);
+    }
+    game.finish_raid();
+    assert_eq!(game.forecast(), (3, 3));
+    assert_eq!(game.floor().development(0), 0);
+    assert!(game.descend(false).unwrap_err().contains("開発24"));
+    develop_current_floor(&mut game);
+    let saved = Game::load(&game.save()).unwrap();
+    assert!(saved.can_descend());
+    game.descend(false).unwrap();
+    assert_eq!(game.floor().development(1), 0);
+    assert!(game.development >= FLOOR_DEVELOPMENT_GOAL);
+    game.place(Order::Chest, Cell { x: 10, y: 7 }, 0).unwrap();
+    assert_eq!(game.forecast(), (3, 1));
+
+    for _ in 0..20 {
+        game.reward(1, 1, 0);
+    }
+    game.finish_raid();
+    assert!(game.descend(false).unwrap_err().contains("開発24"));
+    develop_current_floor(&mut game);
+    assert!(game.can_descend());
 }
