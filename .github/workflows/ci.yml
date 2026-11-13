@@ -12,7 +12,7 @@ jobs:
         with:
           node-version: 22
       - run: cargo test --locked --lib
-      - run: bash build.sh
+      - run: npx --yes wrangler@4.162.0 deploy --dry-run
       - run: node tools/wasm-smoke.mjs
       - uses: actions/upload-artifact@v4
         with:

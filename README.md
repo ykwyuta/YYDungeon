@@ -25,11 +25,10 @@ python -m http.server 8765 --bind 127.0.0.1 --directory dist
 Cloudflare Workers は他の YY シリーズと同じく静的アセットのみを配信します。`wrangler.toml` の Worker 名は `yydungeon`、公開ディレクトリは `dist` です。
 
 ```bash
-bash build.sh
 npx wrangler deploy
 ```
 
-Workers の Git 連携ではルートをリポジトリの直下、ビルドコマンドを `bash build.sh`、デプロイコマンドを `npx wrangler deploy` にします。Cloudflare Pages を使う場合は、ビルドコマンドを `bash build.sh`、出力ディレクトリを `dist` に設定します。
+Workers の Git 連携ではルートをリポジトリの直下、デプロイコマンドを `npx wrangler deploy` にします。Wrangler が `wrangler.toml` のビルド設定から `bash build.sh` を実行して `dist` を生成するため、管理画面のビルドコマンド欄は空欄で構いません。Cloudflare Pages を使う場合は、ビルドコマンドを `bash build.sh`、出力ディレクトリを `dist` に設定します。
 
 ## 遊び方
 
