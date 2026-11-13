@@ -234,7 +234,7 @@ async function main() {
   });
   window.addEventListener("keydown", event => {
     if (refreshing || portraitTouch.matches || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
-    if ([13, 27, 32, 37, 39, 49, 50, 51, 52, 53, 54, 55, 112, 122].includes(event.keyCode)) {
+    if ([13, 27, 32, 37, 39, 49, 50, 51, 52, 53, 54, 55, 56, 112, 122].includes(event.keyCode)) {
       event.preventDefault();
       if (event.keyCode === 122) fullscreen();
       else wasm.yy_event(2, event.keyCode, 0);

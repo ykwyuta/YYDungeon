@@ -30,12 +30,12 @@ fn chest_count_and_rarity_change_the_forecast_and_reward() {
     let mut game = Game::new();
     assert_eq!(game.forecast(), (3, 1));
     assert!(game.place(Order::Chest, Cell { x: 1, y: 2 }, 1).is_err());
-    game.place(Order::Chest, Cell { x: 1, y: 2 }, 0).unwrap();
+    game.place(Order::Chest, Cell { x: 1, y: 1 }, 0).unwrap();
     assert_eq!(game.forecast(), (5, 1));
     assert!(game.place(Order::Chest, Cell { x: 2, y: 2 }, 0).is_err());
     game.active().expand();
     game.loot = 5;
-    game.place(Order::Chest, Cell { x: 1, y: 2 }, 1).unwrap();
+    game.place(Order::Chest, Cell { x: 1, y: 1 }, 1).unwrap();
     assert_eq!(game.forecast(), (5, 3));
     let gold = game.gold;
     game.reward(3, 0, 0);
@@ -122,6 +122,7 @@ fn construction_checks_walls_resources_and_running_raids() {
 #[test]
 fn a_prepared_first_floor_can_earn_and_open_the_second_floor() {
     let mut game = Game::new();
+    game.place(Order::Wall, Cell { x: 1, y: 1 }, 0).unwrap();
     game.place(Order::Spikes, Cell { x: 2, y: 5 }, 0).unwrap();
     game.place(Order::Spikes, Cell { x: 3, y: 5 }, 0).unwrap();
     game.place(Order::Goblin, Cell { x: 4, y: 5 }, 0).unwrap();
@@ -173,7 +174,7 @@ fn digging_branches_and_loops_unlocks_monsters_and_survives_old_saves() {
     assert_eq!(
         restored
             .floor()
-            .site(Cell { x: 2, y: 4 })
+            .site(Cell { x: 1, y: 3 })
             .unwrap()
             .monster(),
         Some((GOBLIN, 38))
@@ -251,7 +252,7 @@ fn smaller_raids_rotate_through_each_rank_including_its_leader() {
 #[test]
 fn melee_paces_attacks_and_preserves_health_when_resuming_mid_fight() {
     let mut game = Game::new();
-    let goblin = Cell { x: 2, y: 4 };
+    let goblin = Cell { x: 1, y: 3 };
     game.begin_raid();
     while !game.invaders()[0].fighting() {
         game.tick(0.25);
@@ -356,4 +357,63 @@ fn adventurers_retarget_an_unopened_chest_and_leave_upper_floors_out_of_the_fore
     let new_floor = Floor::new(1);
     game.floors.push(new_floor);
     assert_eq!(game.forecast(), (0, 0));
+}
+
+#[test]
+fn built_rocks_can_be_dug_again_without_farming_development() {
+    let mut game = Game::new();
+    let rock = Cell { x: 1, y: 1 };
+    let gold = game.gold;
+    let score = game.development;
+
+    assert!(game.place(Order::Wall, ENTRY, 0).is_err());
+    assert!(game.place(Order::Wall, THRONE, 0).is_err());
+    assert!(game.place(Order::Wall, Cell { x: 10, y: 7 }, 0).is_err());
+    // Remove the entrance defender to test the reachability guard on empty floor.
+    assert!(game.place(Order::Wall, Cell { x: 1, y: 3 }, 0).is_err());
+    assert_eq!(game.gold, gold);
+    game.active().sites[Cell { x: 1, y: 3 }.index()] = None;
+    assert!(game.place(Order::Wall, Cell { x: 1, y: 3 }, 0).is_err());
+    assert_eq!(game.gold, gold);
+    assert!(game.floor().open(Cell { x: 1, y: 3 }));
+
+    game.place(Order::Wall, rock, 0).unwrap();
+    assert!(!game.floor().open(rock));
+    assert_eq!(game.floor().dig_development(rock), Some(0));
+    assert_eq!(game.gold, gold - Order::Wall.price());
+    let mut game = Game::load(&game.save()).unwrap();
+    assert!(game.floor().has_placed_rock(rock));
+    game.place(Order::Dig, rock, 0).unwrap();
+    assert!(!game.floor().has_placed_rock(rock));
+    assert!(game.floor().open(rock));
+    assert_eq!(game.development, score);
+}
+
+#[test]
+fn adventurers_choose_safe_detours_but_can_cross_unavoidable_defenses() {
+    let mut floor = Floor::new(0);
+    floor.open.fill(false);
+    let start = Cell { x: 2, y: 2 };
+    let goal = Cell { x: 5, y: 2 };
+    let trap = Cell { x: 3, y: 2 };
+    let monster = Cell { x: 4, y: 2 };
+    for y in 2..=3 {
+        for x in 2..=5 {
+            floor.open[Cell { x, y }.index()] = true;
+        }
+    }
+    floor.sites[trap.index()] = Some(Site::Spikes);
+    floor.sites[monster.index()] = Some(Site::Goblin { hp: 38 });
+    let safe = floor.adventurer_route(start, goal).unwrap();
+    assert_eq!(floor.route(start, goal).unwrap().len(), 4);
+    assert_eq!(safe.len(), 6);
+    assert!(!safe.contains(&trap) && !safe.contains(&monster));
+
+    floor.open[Cell { x: 3, y: 3 }.index()] = false;
+    assert!(floor.adventurer_route(start, goal).unwrap().contains(&trap));
+    floor.sites[monster.index()] = Some(Site::Goblin { hp: 0 });
+    assert_eq!(
+        floor.adventurer_route(trap, goal).unwrap(),
+        [trap, monster, goal]
+    );
 }

@@ -223,7 +223,7 @@ impl Art {
 }
 
 const fn order_row(index: usize) -> Rect {
-    Rect::new(868.0, 270.0 + index as f32 * 39.0, 328.0, 34.0)
+    Rect::new(868.0, 270.0 + index as f32 * 34.0, 328.0, 30.0)
 }
 const fn rarity_button(index: usize) -> Rect {
     Rect::new(868.0 + index as f32 * 82.0, 574.0, 76.0, 27.0)
@@ -553,7 +553,7 @@ impl Screen {
                     37 => self.switch_floor(self.floor.saturating_sub(1)),
                     39 => self.switch_floor(self.floor + 1),
                     51 => self.select_order(Order::Bestiary),
-                    49..=55 if self.live() && !self.game.running() => {
+                    49..=56 if self.live() && !self.game.running() => {
                         self.select_order(Order::ALL[(key - 49) as usize])
                     }
                     _ => {}
@@ -1001,6 +1001,7 @@ impl View<'_> {
                     }
                     .into(),
                     None if floor.open(cell) => "通路".into(),
+                    None if floor.has_placed_rock(cell) => "設置した岩壁　掘削で通路に戻す".into(),
                     None if self.order == Order::Dig => floor.dig_development(cell).map_or_else(
                         || "石壁".into(),
                         |gain| format!("石壁　掘削で迷宮開発 +{gain}"),
@@ -1014,7 +1015,7 @@ impl View<'_> {
             "入口から玉座まで、冒険者の通り道を守ろう。".into()
         };
         Rect::new(43.0, 615.0, 510.0, 22.0).label(g, &detail, Font::Normal, DIM);
-        Rect::new(598.0, 616.0, 200.0, 22.0).label(g, "●　玉座・宝箱への道筋", Font::Small, GOLD);
+        Rect::new(598.0, 616.0, 200.0, 22.0).label(g, "●　危険を避ける予想経路", Font::Small, GOLD);
     }
 
     fn side(&self, g: &mut Gfx) {
@@ -1071,24 +1072,28 @@ impl View<'_> {
                     self.art.draw_monster(
                         g,
                         id,
-                        Rect::new(rect.x + 6.0, rect.y + 3.0, 29.0, 28.0),
+                        Rect::new(rect.x + 6.0, rect.y + 2.0, 29.0, 26.0),
                         1.0,
                     );
                 }
                 0 | 1 | 3 | 4 => self.art.draw(
                     g,
                     [8, 2, 1, 9, 10][i],
-                    Rect::new(rect.x + 6.0, rect.y + 3.0, 29.0, 28.0),
+                    Rect::new(rect.x + 6.0, rect.y + 2.0, 29.0, 26.0),
                     if build { 1.0 } else { 0.55 },
                 ),
                 _ => Rect::new(rect.x + 7.0, rect.y + 4.0, 26.0, 26.0).label(
                     g,
-                    if i == 5 { "＋" } else { "−" },
+                    match i {
+                        5 => "＋",
+                        6 => "−",
+                        _ => "▣",
+                    },
                     Font::NormalCenter,
                     GOLD,
                 ),
             }
-            Rect::new(rect.x + 41.0, rect.y + 7.0, 149.0, 22.0).label(
+            Rect::new(rect.x + 41.0, rect.y + 5.0, 149.0, 22.0).label(
                 g,
                 order.name(),
                 Font::Normal,
@@ -1110,13 +1115,13 @@ impl View<'_> {
             } else {
                 format!("{} 金貨", price)
             };
-            Rect::new(rect.x + 196.0, rect.y + 5.0, 103.0, 24.0).label(
+            Rect::new(rect.x + 196.0, rect.y + 3.0, 103.0, 24.0).label(
                 g,
                 &cost,
                 Font::NormalCenter,
                 GOLD,
             );
-            Rect::new(rect.x + 305.0, rect.y + 9.0, 20.0, 18.0).label(
+            Rect::new(rect.x + 305.0, rect.y + 7.0, 20.0, 18.0).label(
                 g,
                 &(i + 1).to_string(),
                 Font::Small,
@@ -1332,7 +1337,7 @@ impl View<'_> {
             Rect::new(304.0, 167.0, 632.0, 51.0).label(g, "迷宮工房の遊び方", Font::TitleMid, TEXT);
             for (i, (title, detail)) in [
                 ("建設", "右の指示を選び、迷路の区画を押すとゴブリンが作業します。分岐や回り道を掘ると、図鑑から新しい魔物を配置できます。"),
-                ("おびき寄せる", "宝箱を置くと冒険者が来ます。箱が多いほど人数が増え、レアな品には強敵が来ます。開けられた箱は消えます。"),
+                ("おびき寄せる", "宝箱を置くと冒険者が来ます。箱が多いほど人数が増え、レアな品には強敵が来ます。開けられた箱は消えます。冒険者は罠や魔物を避けて進みます。"),
                 ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨と資材を回収します。HPは魔物が青緑、冒険者が赤です。玉座の主が倒されると陥落します。"),
                 ("拡張と委任", "撃退で迷路・建設予算・配置枠が増えます。新しい階へ移ると、前の階を中ボスに任せられます。一定レベル以上の敵は新しい階まで来ます。"),
             ].into_iter().enumerate() {

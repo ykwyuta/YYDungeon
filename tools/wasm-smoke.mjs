@@ -60,8 +60,8 @@ wasm.yy_event(2, 27, 0);
 wasm.yy_frame(0, 1);
 
 // Mouse placement through the shared screen, then keyboard starts the wave.
-wasm.yy_event(1, 980, 406);
-wasm.yy_event(1, 198, 307);
+wasm.yy_event(1, 980, 387);
+wasm.yy_event(1, 198, 261);
 wasm.yy_frame(0, 1);
 assert.equal(game().gold, 151);
 wasm.yy_event(2, 13, 0);
@@ -111,3 +111,14 @@ wasm.yy_event(1, 270, 425);
 wasm.yy_event(1, 335, 352);
 wasm.yy_frame(0, 1);
 assert.ok(game().floors[0].sites.some(site => site?.Monster?.id === 4));
+
+wasm.yy_event(2, 56, 0); // 8 places a rock on an unused passage.
+wasm.yy_event(1, 244, 261);
+wasm.yy_frame(0, 1);
+assert.ok(game().floors[0].placed_rocks.some(cell => cell.x === 2 && cell.y === 1));
+const developmentBefore = game().development;
+wasm.yy_event(2, 54, 0);
+wasm.yy_event(1, 244, 261);
+wasm.yy_frame(0, 1);
+assert.equal(game().floors[0].placed_rocks.length, 0);
+assert.equal(game().development, developmentBefore);

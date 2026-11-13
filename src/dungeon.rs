@@ -1,7 +1,8 @@
 use crate::adventurers::{raid_class, ADVENTURERS};
 use crate::monsters::{Monster, Tactic, GOBLIN, MONSTERS, SENTINEL};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, VecDeque};
 
 pub const WIDTH: usize = 17;
 pub const HEIGHT: usize = 13;
@@ -78,10 +79,11 @@ pub enum Order {
     Frost,
     Dig,
     Remove,
+    Wall,
 }
 
 impl Order {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Chest,
         Self::Goblin,
         Self::Bestiary,
@@ -89,6 +91,7 @@ impl Order {
         Self::Frost,
         Self::Dig,
         Self::Remove,
+        Self::Wall,
     ];
 
     pub fn name(self) -> &'static str {
@@ -102,6 +105,7 @@ impl Order {
             Self::Frost => "氷結の罠",
             Self::Dig => "掘削",
             Self::Remove => "撤去",
+            Self::Wall => "岩壁を置く",
         }
     }
 
@@ -115,6 +119,7 @@ impl Order {
             Self::Spikes => 19,
             Self::Frost => 38,
             Self::Dig => 14,
+            Self::Wall => 10,
         }
     }
 
@@ -137,6 +142,7 @@ impl Order {
             Self::Frost => "5ダメージを与え、冒険者を2手止めます。",
             Self::Dig => "通路に接した内壁を掘り、迷路に新しい道を作ります。",
             Self::Remove => "設置物を撤去して、配置枠を空けます。",
+            Self::Wall => "空き床を岩でふさぎます。置いた岩は掘削で取り除けます。",
         }
     }
 
@@ -201,6 +207,8 @@ pub struct Floor {
     pub tier: u8,
     earned: u32,
     open: Vec<bool>,
+    #[serde(default)]
+    placed_rocks: Vec<Cell>,
     pub sites: Vec<Option<Site>>,
     pub steward: bool,
 }
@@ -211,6 +219,7 @@ impl Floor {
             tier: 1,
             earned: 0,
             open: vec![false; WIDTH * HEIGHT],
+            placed_rocks: Vec::new(),
             sites: vec![None; WIDTH * HEIGHT],
             steward: false,
         };
@@ -247,6 +256,10 @@ impl Floor {
 
     pub fn open(&self, cell: Cell) -> bool {
         self.contains(cell) && self.open[cell.index()]
+    }
+
+    pub fn has_placed_rock(&self, cell: Cell) -> bool {
+        self.placed_rocks.contains(&cell)
     }
 
     pub fn site(&self, cell: Cell) -> Option<Site> {
@@ -300,13 +313,27 @@ impl Floor {
     }
 
     fn route(&self, start: Cell, goal: Cell) -> Option<Vec<Cell>> {
+        self.find_route(start, goal, false)
+    }
+
+    fn adventurer_route(&self, start: Cell, goal: Cell) -> Option<Vec<Cell>> {
+        self.find_route(start, goal, true)
+    }
+
+    fn find_route(&self, start: Cell, goal: Cell, avoid_danger: bool) -> Option<Vec<Cell>> {
         if !self.open(start) || !self.open(goal) {
             return None;
         }
         let mut parents = [None; WIDTH * HEIGHT];
-        let mut queue = VecDeque::from([start]);
-        parents[start.index()] = Some(start);
-        while let Some(cell) = queue.pop_front() {
+        let mut costs = [(u16::MAX, u16::MAX); WIDTH * HEIGHT];
+        let mut queue = BinaryHeap::new();
+        queue.push(Reverse(((0, 0), 0, start)));
+        costs[start.index()] = (0, 0);
+        let mut sequence = 0;
+        while let Some(Reverse((cost, _, cell))) = queue.pop() {
+            if costs[cell.index()] != cost {
+                continue;
+            }
             if cell == goal {
                 let mut route = vec![goal];
                 let mut previous = goal;
@@ -318,13 +345,36 @@ impl Floor {
                 return Some(route);
             }
             for next in cell.neighbors().filter(|&next| self.open(next)) {
-                if parents[next.index()].is_none() {
+                let guarded = avoid_danger
+                    && self.site(next).is_some_and(|site| {
+                        site.is_trap() || site.monster().is_some_and(|(_, hp)| hp > 0)
+                    });
+                // Prefer fewer hazardous tiles, then the shortest route with that risk.
+                let cost = (cost.0 + u16::from(guarded), cost.1 + 1);
+                if cost < costs[next.index()] {
+                    costs[next.index()] = cost;
                     parents[next.index()] = Some(cell);
-                    queue.push_back(next);
+                    sequence += 1;
+                    queue.push(Reverse((cost, sequence, next)));
                 }
             }
         }
         None
+    }
+
+    fn reachable_from_entrance(&self) -> [bool; WIDTH * HEIGHT] {
+        let mut reachable = [false; WIDTH * HEIGHT];
+        let mut queue = VecDeque::from([ENTRY]);
+        reachable[ENTRY.index()] = true;
+        while let Some(cell) = queue.pop_front() {
+            for next in cell.neighbors().filter(|&next| self.open(next)) {
+                if !reachable[next.index()] {
+                    reachable[next.index()] = true;
+                    queue.push_back(next);
+                }
+            }
+        }
+        reachable
     }
 
     pub fn dig_development(&self, cell: Cell) -> Option<u32> {
@@ -347,7 +397,11 @@ impl Floor {
             })
             .count() as u32
             + links.saturating_sub(2);
-        Some(1 + new_branches + 2 * (links - 1))
+        Some(if self.has_placed_rock(cell) {
+            0
+        } else {
+            1 + new_branches + 2 * (links - 1)
+        })
     }
 
     fn complexity(&self) -> u32 {
@@ -470,9 +524,9 @@ impl Game {
         let mut floor = Floor::new(0);
         for (cell, site) in [
             (Cell { x: 10, y: 7 }, Site::Chest { rarity: 0 }),
-            (Cell { x: 1, y: 3 }, Site::Spikes),
+            (Cell { x: 1, y: 2 }, Site::Spikes),
             (Cell { x: 2, y: 3 }, Site::Spikes),
-            (Cell { x: 2, y: 4 }, Site::Goblin { hp: 38 }),
+            (Cell { x: 1, y: 3 }, Site::Goblin { hp: 38 }),
         ] {
             floor.sites[cell.index()] = Some(site);
         }
@@ -556,6 +610,32 @@ impl Game {
             self.message("ゴブリンが設置物を片付けました。金貨 +5");
             return Ok(());
         }
+        if order == Order::Wall {
+            if old.is_some() || !self.floor().open(cell) {
+                return Err("岩壁を置くには空き床を選んでください。");
+            }
+            if self.gold < order.price() {
+                return Err("金貨が足りません。");
+            }
+            let floor = self.active();
+            let before = floor.reachable_from_entrance();
+            floor.open[cell.index()] = false;
+            let after = floor.reachable_from_entrance();
+            if !after[THRONE.index()]
+                || before.iter().zip(after).enumerate().any(
+                    |(index, (&was_reachable, reachable))| {
+                        index != cell.index() && was_reachable && !reachable
+                    },
+                )
+            {
+                floor.open[cell.index()] = true;
+                return Err("入口から玉座や他の通路への道を塞げません。");
+            }
+            floor.placed_rocks.push(cell);
+            self.gold -= order.price();
+            self.message("ゴブリンが岩壁を築きました。掘削すると通路に戻せます。");
+            return Ok(());
+        }
         if order == Order::Dig {
             if cell.x == 0 || cell.y == 0 || cell.x == w - 1 || cell.y == h - 1 {
                 return Err("フロアの外壁は掘れません。");
@@ -568,7 +648,13 @@ impl Game {
                 return Err("金貨が足りません。");
             }
             self.gold -= order.price();
-            self.active().open[cell.index()] = true;
+            let floor = self.active();
+            floor.open[cell.index()] = true;
+            if gain == 0 {
+                floor.placed_rocks.retain(|&rock| rock != cell);
+                self.message("ゴブリンが置いた岩を取り除き、通路に戻しました。");
+                return Ok(());
+            }
             let unlocked = MONSTERS
                 .iter()
                 .filter(|monster| {
@@ -859,7 +945,7 @@ impl Game {
         let chest = self.chest_target((raid.spawn / 3) as usize);
         let floor = self.floor();
         let route = floor
-            .route(ENTRY, chest.unwrap_or(THRONE))
+            .adventurer_route(ENTRY, chest.unwrap_or(THRONE))
             .expect("reachable destination");
         let hp = 22 + 9 * level as i32 + ADVENTURERS[class as usize].health;
         raid.invaders.push(Invader {
@@ -972,7 +1058,7 @@ impl Game {
             };
             invader.route = self
                 .floor()
-                .route(cell, invader.chest.unwrap_or(THRONE))
+                .adventurer_route(cell, invader.chest.unwrap_or(THRONE))
                 .expect("reachable destination");
             invader.step = 0;
             return true;
@@ -1047,7 +1133,9 @@ impl Game {
     }
 
     pub fn preview_route(&self, destination: Cell) -> Vec<Cell> {
-        self.floor().route(ENTRY, destination).unwrap_or_default()
+        self.floor()
+            .adventurer_route(ENTRY, destination)
+            .unwrap_or_default()
     }
 
     pub fn save(&self) -> Vec<u8> {
@@ -1101,6 +1189,11 @@ impl Game {
                 || floor.earned > self.kills
                 || floor.open.len() != WIDTH * HEIGHT
                 || floor.sites.len() != WIDTH * HEIGHT
+                || floor.placed_rocks.len() > WIDTH * HEIGHT
+                || floor
+                    .placed_rocks
+                    .iter()
+                    .any(|&cell| !floor.contains(cell) || floor.open(cell))
                 || !floor.open(ENTRY)
                 || !floor.open(THRONE)
                 || floor.route(ENTRY, THRONE).is_none()
