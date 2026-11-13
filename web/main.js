@@ -13,6 +13,7 @@ const fonts = new Map([
   [1, [14, false, '14px ' + sans]],
   [2, [14, true, '14px ' + sans]],
   [3, [18, false, 'bold 18px ' + sans]],
+  [5, [40, true, 'bold 40px ' + serif]],
   [6, [30, true, 'bold 30px ' + serif]],
 ]);
 let wasm;
@@ -140,6 +141,7 @@ function point(event) {
 }
 
 function save() {
+  if (!wasm.yy_can_autosave()) return;
   try {
     const len = wasm.yy_save_size();
     if (len) localStorage.setItem(saveKey, decoder.decode(memory(wasm.yy_save_ptr(), len)));

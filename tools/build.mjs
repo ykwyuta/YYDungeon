@@ -13,6 +13,11 @@ mkdirSync(dist, { recursive: true });
 for (const [src, dest] of [
   ["web/index.html", "index.html"],
   ["web/main.js", "main.js"],
+  ["web/_headers", "_headers"],
+  ["web/manifest.webmanifest", "manifest.webmanifest"],
+  ["web/icon-192.png", "icon-192.png"],
+  ["web/icon-512.png", "icon-512.png"],
+  ["web/apple-touch-icon.png", "apple-touch-icon.png"],
   ["assets/app_icon.ico", "favicon.ico"],
   ["target/wasm32-unknown-unknown/release/yydungeon.wasm", "yydungeon.wasm"],
 ]) {

@@ -132,7 +132,7 @@ impl Grid {
     }
 }
 
-const SPRITES: [&[u8]; 11] = [
+const SPRITES: [&[u8]; 12] = [
     include_bytes!("../assets/warden.png"),
     include_bytes!("../assets/sentinel.png"),
     include_bytes!("../assets/goblin.png"),
@@ -144,6 +144,7 @@ const SPRITES: [&[u8]; 11] = [
     include_bytes!("../assets/chest.png"),
     include_bytes!("../assets/spikes.png"),
     include_bytes!("../assets/frost.png"),
+    include_bytes!("../assets/title.jpg"),
 ];
 
 struct Art {
@@ -198,6 +199,8 @@ const PAUSE: Rect = Rect::new(722.0, 126.0, 109.0, 36.0);
 const HEAL: Rect = Rect::new(868.0, 657.0, 155.0, 32.0);
 const DEPTH: Rect = Rect::new(1030.0, 657.0, 166.0, 32.0);
 const RAID: Rect = Rect::new(868.0, 700.0, 328.0, 42.0);
+const TITLE_START: Rect = Rect::new(81.0, 433.0, 303.0, 55.0);
+const TITLE_HELP: Rect = Rect::new(81.0, 503.0, 303.0, 43.0);
 
 #[derive(Clone, Copy)]
 pub(crate) enum Event {
@@ -218,6 +221,8 @@ enum Overlay {
 pub(crate) struct Screen {
     pub gfx: Gfx,
     pub game: Game,
+    title: bool,
+    has_save: bool,
     art: Art,
     floor: usize,
     order: Order,
@@ -230,11 +235,15 @@ pub(crate) struct Screen {
 }
 
 impl Screen {
-    pub fn new(gfx: Gfx, game: Game) -> Self {
+    pub fn new(gfx: Gfx, saved_game: Option<Game>) -> Self {
+        let has_save = saved_game.is_some();
+        let game = saved_game.unwrap_or_else(Game::new);
         let floor = game.floors.len() - 1;
         Self {
             gfx,
             game,
+            title: true,
+            has_save,
             art: Art {
                 generation: 0,
                 bitmaps: Vec::new(),
@@ -256,6 +265,15 @@ impl Screen {
 
     fn floor(&self) -> &Floor {
         &self.game.floors[self.floor]
+    }
+
+    pub fn should_save(&self) -> bool {
+        !self.title
+    }
+
+    fn enter_workshop(&mut self) {
+        self.title = false;
+        self.reset_view();
     }
 
     fn reset_view(&mut self) {
@@ -309,7 +327,9 @@ impl Screen {
         if overlay == Overlay::Help {
             if Rect::new(786.0, 578.0, 147.0, 38.0).has(x, y) {
                 self.overlay = None;
-            } else if Rect::new(307.0, 578.0, 150.0, 38.0).has(x, y) {
+            } else if (!self.title || self.has_save)
+                && Rect::new(307.0, 578.0, 150.0, 38.0).has(x, y)
+            {
                 self.overlay = Some(Overlay::Reset);
             }
             return;
@@ -329,7 +349,7 @@ impl Screen {
             },
             (Overlay::Reset, 2) | (Overlay::Defeat, 2) => {
                 self.game = Game::new();
-                self.reset_view();
+                self.enter_workshop();
             }
             (Overlay::Defeat, 0) => {}
             _ => self.overlay = None,
@@ -339,6 +359,14 @@ impl Screen {
     fn click(&mut self, x: f32, y: f32) {
         if let Some(overlay) = self.overlay {
             self.overlay_click(overlay, x, y);
+            return;
+        }
+        if self.title {
+            if TITLE_START.has(x, y) {
+                self.enter_workshop();
+            } else if TITLE_HELP.has(x, y) {
+                self.overlay = Some(Overlay::Help);
+            }
             return;
         }
         if HELP.has(x, y) {
@@ -411,7 +439,10 @@ impl Screen {
                     self.overlay = None;
                     self.order = Order::Inspect;
                 }
-                Event::Key(key) if self.overlay.is_none() => match key {
+                Event::Key(13 | 32) if self.title && self.overlay.is_none() => {
+                    self.enter_workshop();
+                }
+                Event::Key(key) if !self.title && self.overlay.is_none() => match key {
                     13 => self.start_raid(),
                     32 => self.game.paused = !self.game.paused,
                     37 => self.switch_floor(self.floor.saturating_sub(1)),
@@ -424,10 +455,10 @@ impl Screen {
                 _ => {}
             }
         }
-        if self.overlay.is_none() && focused {
+        if !self.title && self.overlay.is_none() && focused {
             self.game.tick(dt);
         }
-        if self.game.defeated && self.overlay.is_none() {
+        if !self.title && self.game.defeated && self.overlay.is_none() {
             self.overlay = Some(Overlay::Defeat);
         }
         if let Some((_, t)) = &mut self.notice {
@@ -463,8 +494,13 @@ impl Screen {
                 notice: self.notice.as_ref().map(|(text, _)| text.as_str()),
                 working: self.working,
                 art: &self.art,
+                can_reset: !self.title || self.has_save,
             };
-            view.draw(&mut self.gfx);
+            if self.title {
+                view.draw_title(&mut self.gfx, self.has_save);
+            } else {
+                view.draw(&mut self.gfx);
+            }
             self.gfx.d2d_end();
         }
         self.gfx.present();
@@ -482,6 +518,7 @@ struct View<'a> {
     notice: Option<&'a str>,
     working: Option<(Cell, f32)>,
     art: &'a Art,
+    can_reset: bool,
 }
 
 impl View<'_> {
@@ -491,6 +528,42 @@ impl View<'_> {
 
     fn floor(&self) -> &Floor {
         &self.game.floors[self.floor]
+    }
+
+    fn draw_title(&self, g: &mut Gfx, has_save: bool) {
+        let frame = Rect::new(0.0, 0.0, W, H);
+        frame.fill(g, BG);
+        self.art.draw(g, 11, frame, 1.0);
+        for band in 0..48 {
+            let t = band as f32 / 47.0;
+            let width = 13.0;
+            Rect::new(band as f32 * width, 0.0, width + 0.25, H)
+                .fill(g, [0.035, 0.055, 0.09, 0.72 * (1.0 - t).powf(1.5)]);
+        }
+        frame.inset(17.0).edge(g, [0.8, 0.63, 0.39, 0.58]);
+        Rect::new(81.0, 220.0, 320.0, 23.0).label(g, "YYDUNGEON", Font::Normal, GOLD);
+        Rect::new(73.0, 252.0, 314.0, 78.0).label(g, "迷 宮 工 房", Font::Title, TEXT);
+        Rect::new(82.0, 345.0, 301.0, 1.0).fill(g, GOLD);
+        Rect::new(81.0, 364.0, 346.0, 26.0).label(
+            g,
+            "ゴブリンと築く、冒険者を呼ぶ迷宮。",
+            Font::Big,
+            TEXT,
+        );
+        TITLE_START.button(
+            g,
+            if has_save {
+                "つづきから　 [Enter]"
+            } else {
+                "はじめる　 [Enter]"
+            },
+            true,
+            true,
+        );
+        TITLE_HELP.button(g, "遊び方　 [F1]", false, true);
+        if let Some(overlay) = self.overlay {
+            self.overlay(g, overlay);
+        }
     }
 
     fn draw(&self, g: &mut Gfx) {
@@ -972,7 +1045,9 @@ impl View<'_> {
                 Rect::new(308.0, y, 617.0, 22.0).label(g, title, Font::Normal, GOLD);
                 Rect::new(308.0, y + 23.0, 617.0, 51.0).label(g, detail, Font::Normal, TEXT);
             }
-            Rect::new(307.0, 578.0, 150.0, 38.0).button(g, "最初から", false, true);
+            if self.can_reset {
+                Rect::new(307.0, 578.0, 150.0, 38.0).button(g, "最初から", false, true);
+            }
             Rect::new(786.0, 578.0, 147.0, 38.0).button(g, "閉じる　Esc", true, true);
             return;
         }

@@ -12,7 +12,7 @@ name = "yydungeon-win"
 path = "src/main.rs"
 
 [dependencies]
-image = { version = "0.25.9", default-features = false, features = ["png"] }
+image = { version = "0.25.9", default-features = false, features = ["jpeg", "png"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

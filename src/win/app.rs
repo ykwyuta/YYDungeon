@@ -1,6 +1,5 @@
 use crate::{
     crashlog,
-    dungeon::Game,
     gfx::Gfx,
     lang, platform,
     screen::{Event, Screen},
@@ -135,7 +134,7 @@ fn run() -> Result<()> {
             client.right.max(1) as u32,
             client.bottom.max(1) as u32,
         )?;
-        let mut screen = Screen::new(gfx, platform::load().unwrap_or_else(Game::new));
+        let mut screen = Screen::new(gfx, platform::load());
         let mut last = Instant::now();
         let mut saved = last;
         let mut state_at = last;
@@ -186,15 +185,17 @@ fn run() -> Result<()> {
                     game.boss
                 ));
             }
-            if now - saved >= Duration::from_secs(2) {
+            if screen.should_save() && now - saved >= Duration::from_secs(2) {
                 saved = now;
                 if let Err(error) = platform::save(&screen.game) {
                     crashlog::warn_limited("save", &error.to_string());
                 }
             }
         }
-        if let Err(error) = platform::save(&screen.game) {
-            crashlog::warn_limited("save", &error.to_string());
+        if screen.should_save() {
+            if let Err(error) = platform::save(&screen.game) {
+                crashlog::warn_limited("save", &error.to_string());
+            }
         }
     }
     Ok(())

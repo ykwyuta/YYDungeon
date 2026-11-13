@@ -35,7 +35,7 @@ pub extern "C" fn yy_init(w: u32, h: u32) {
         unsafe { browser_error(message.as_ptr(), message.len()) };
     }));
     let bytes = LOAD.take();
-    let game = Game::load(&bytes).unwrap_or_else(Game::new);
+    let game = Game::load(&bytes);
     GAME.with_borrow_mut(|slot| *slot = Some(Screen::new(Gfx::new(w, h), game)));
 }
 
@@ -61,6 +61,11 @@ pub extern "C" fn yy_frame(dt: f32, focused: u32) {
             });
         }
     });
+}
+
+#[no_mangle]
+pub extern "C" fn yy_can_autosave() -> u32 {
+    GAME.with_borrow(|slot| u32::from(slot.as_ref().is_some_and(Screen::should_save)))
 }
 
 #[no_mangle]

@@ -8,6 +8,7 @@ pub enum Font {
     Normal = 1,
     NormalCenter = 2,
     Big = 3,
+    Title = 5,
     TitleMid = 6,
 }
 

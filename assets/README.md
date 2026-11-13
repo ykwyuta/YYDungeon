@@ -16,3 +16,15 @@ Use case: stylized-concept. One isolated closed medieval wooden treasure chest g
 ## traps
 
 Use case: stylized-concept. One small 2D dungeon trap spritesheet containing exactly two fully isolated objects in two side-by-side equal square cells on a genuinely transparent background, widely separated, never overlapping the central divider. LEFT: five short steel spikes protruding from a flat dark slate pressure plate, with worn bronze corners. RIGHT: a blue magical frost trap with a clustered faceted ice crystal rising from a dark stone rune base. Both shown from the same elevated three-quarter top-down JRPG angle. Rich hand-painted fantasy strategy-game sprites with clear silhouettes readable at 24 pixels, whole objects visible with generous margins, no ground, no text, no labels or extra objects.
+
+## スタート画面とアプリアイコン
+
+スタート画面（`assets/title.jpg`）とアプリアイコン（`assets/app_icon.ico` と `web/` の PNG 3種）は組み込み ImageGen で新規生成しました。
+
+### スタート画面
+
+Wide 16:9 cover illustration for Japanese retro fantasy dungeon management game YYDungeon. A hand-painted cutaway of a stone underground maze and goblin workshop, viewed from elevated isometric angle with thick dark basalt brick walls and glowing amber lanterns. Composition: concentrated on the RIGHT half, charismatic moss-green goblin foreman in a leather apron holding pickaxe and parchment on a ledge, small glowing brass treasure chest, faint ice-blue crystal demon deeper in the maze. LEFT 40 percent is moody nearly black navy underground masonry and very subdued quiet negative space for overlaid title and buttons. Amber, slate blue and midnight navy, richly detailed hand-painted medieval strategy game sprite art, atmospheric, no blood, no lettering, no logos, no border, no UI.
+
+### アプリアイコン
+
+Original square app icon for a medieval dark fantasy Japanese dungeon builder. A single striking mark: a glowing amber treasure chest recessed into a stylized stone labyrinth entrance, with the maze walls wrapping around three sides in a symmetrical chunky single glyph. Deep midnight navy and cool slate blue stone, antique gold light, subtle hand-painted texture, strong high contrast silhouette and large simplified shapes easily readable at 16px. Centered icon on a solid midnight navy square background, artwork limited to central 65 percent so platform mask safe, no lettering, no words, no numbers, no symbols outside the motif, no border. Square app icon ready for Windows ICO and browser favicon.

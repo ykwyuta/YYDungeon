@@ -20,7 +20,20 @@ python -m http.server 8765 --bind 127.0.0.1 --directory dist
 
 [http://127.0.0.1:8765/](http://127.0.0.1:8765/) を開きます。GitHub Actions からも Windows の実行ファイルとブラウザ用の静的ファイルを取得できます。
 
+## Cloudflare 配信
+
+Cloudflare Workers は他の YY シリーズと同じく静的アセットのみを配信します。`wrangler.toml` の Worker 名は `yydungeon`、公開ディレクトリは `dist` です。
+
+```bash
+bash build.sh
+npx wrangler deploy
+```
+
+Workers の Git 連携ではルートをリポジトリの直下、ビルドコマンドを `bash build.sh`、デプロイコマンドを `npx wrangler deploy` にします。Cloudflare Pages を使う場合は、ビルドコマンドを `bash build.sh`、出力ディレクトリを `dist` に設定します。
+
 ## 遊び方
+
+スタート画面の「はじめる」で工房に入ります。保存がある場合は「つづきから」で再開できます。
 
 1. 右の工務隊で指示を選び、迷路の区画をクリックまたはタップします。宝箱、モンスター、罠は通路に置けます。掘削は通路に接した内壁に使えます。
 2. 宝箱を増やすと冒険者の人数が増えます。レア度を選んで新設または既存の宝箱を指定すると、より強い冒険者を呼べます。宝箱を調べると入口から宝箱までの道筋を確認できます。
