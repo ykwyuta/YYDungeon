@@ -18,6 +18,7 @@ const fonts = new Map([
   [6, [30, true, 'bold 30px ' + serif]],
 ]);
 let wasm;
+let refreshing = false;
 
 function memory(ptr, len) {
   return new Uint8Array(wasm.memory.buffer, ptr, len);
@@ -142,17 +143,64 @@ function point(event) {
 }
 
 function save() {
-  if (!wasm.yy_can_autosave()) return;
+  if (!wasm.yy_can_autosave()) return true;
   try {
     const len = wasm.yy_save_size();
     if (len) localStorage.setItem(saveKey, decoder.decode(memory(wasm.yy_save_ptr(), len)));
+    return true;
   } catch (error) {
     console.warn("迷宮の記録を保存できませんでした", error);
+    return false;
+  }
+}
+
+async function refreshCache() {
+  if (refreshing || !window.confirm("進行を保存し、ゲームのキャッシュを消して再読み込みします。続けますか？")) return;
+  if (!save()) {
+    window.alert("進行を保存できなかったため、再読み込みを中止しました。");
+    return;
+  }
+  refreshing = true;
+  try {
+    const base = new URL("./", document.baseURI);
+    const next = new URL(location.href);
+    next.searchParams.set("_yyrefresh", Date.now().toString(36));
+    const files = ["index.html", "main.js", "yydungeon.wasm", "manifest.webmanifest",
+      "favicon.ico", "icon-192.png", "icon-512.png", "apple-touch-icon.png"]
+      .map(file => new URL(file, base));
+    const paths = new Set([base, next, ...files].map(url => url.origin + url.pathname));
+    try {
+      if ("caches" in window) {
+        for (const name of await caches.keys()) {
+          const cache = await caches.open(name);
+          for (const request of await cache.keys()) {
+            const url = new URL(request.url);
+            if (paths.has(url.origin + url.pathname)) await cache.delete(request);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("ゲームのキャッシュを開けませんでした", error);
+    }
+    await Promise.all([next, ...files].map(async url => {
+      const response = await fetch(url, { cache: "reload" });
+      if (!response.ok) throw new Error("HTTP " + response.status + " " + url.pathname);
+      await response.arrayBuffer();
+    }));
+    location.replace(next.href);
+  } catch (error) {
+    refreshing = false;
+    console.warn("再読み込みを中止しました", error);
+    window.alert("更新ファイルを取得できませんでした。通信状態を確認して、もう一度お試しください。");
   }
 }
 
 async function main() {
-  const response = await fetch("yydungeon.wasm");
+  const page = new URL(location.href);
+  const refreshToken = page.searchParams.get("_yyrefresh");
+  const wasmUrl = new URL("yydungeon.wasm", document.baseURI);
+  if (refreshToken) wasmUrl.searchParams.set("_yyrefresh", refreshToken);
+  const response = await fetch(wasmUrl);
   if (!response.ok) throw new Error("Wasm HTTP " + response.status);
   wasm = (await WebAssembly.instantiate(await response.arrayBuffer(), { env })).instance.exports;
   try {
@@ -170,16 +218,22 @@ async function main() {
   canvas.height = h;
   wasm.yy_init(w, h);
   status.hidden = true;
+  if (refreshToken) {
+    page.searchParams.delete("_yyrefresh");
+    history.replaceState(history.state, "", page.href);
+  }
   new ResizeObserver(resize).observe(canvas);
   window.addEventListener("resize", resize);
-  canvas.addEventListener("pointermove", event => wasm.yy_event(0, ...point(event)));
+  canvas.addEventListener("pointermove", event => {
+    if (!refreshing) wasm.yy_event(0, ...point(event));
+  });
   canvas.addEventListener("pointerdown", event => {
-    if (event.button !== 0) return;
+    if (refreshing || event.button !== 0) return;
     canvas.focus({ preventScroll: true });
     wasm.yy_event(1, ...point(event));
   });
   window.addEventListener("keydown", event => {
-    if (portraitTouch.matches || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (refreshing || portraitTouch.matches || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
     if ([13, 27, 32, 37, 39, 49, 50, 51, 52, 53, 54, 55, 112, 122].includes(event.keyCode)) {
       event.preventDefault();
       if (event.keyCode === 122) fullscreen();
@@ -192,7 +246,9 @@ async function main() {
   let saved = last;
   function frame(now) {
     const active = !portraitTouch.matches && !document.hidden && document.hasFocus();
-    wasm.yy_frame(Math.min(0.25, (now - last) / 1000), Number(active));
+    if (!refreshing && wasm.yy_frame(Math.min(0.25, (now - last) / 1000), Number(active))) {
+      void refreshCache();
+    }
     last = now;
     if (now - saved >= 2000) {
       save();

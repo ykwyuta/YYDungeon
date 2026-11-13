@@ -52,15 +52,17 @@ pub extern "C" fn yy_event(kind: u32, x: f32, y: f32) {
 }
 
 #[no_mangle]
-pub extern "C" fn yy_frame(dt: f32, focused: u32) {
+pub extern "C" fn yy_frame(dt: f32, focused: u32) -> u32 {
     GAME.with_borrow_mut(|slot| {
         if let Some(screen) = slot {
             EVENTS.with_borrow_mut(|events| {
                 screen.frame(events, dt, focused != 0);
                 events.clear();
             });
+            return u32::from(screen.take_refresh_request());
         }
-    });
+        0
+    })
 }
 
 #[no_mangle]

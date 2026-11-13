@@ -200,6 +200,8 @@ const HEAL: Rect = Rect::new(868.0, 657.0, 155.0, 32.0);
 const DEPTH: Rect = Rect::new(1030.0, 657.0, 166.0, 32.0);
 const RAID: Rect = Rect::new(868.0, 700.0, 328.0, 42.0);
 const TITLE_START: Rect = Rect::new(81.0, 433.0, 303.0, 55.0);
+#[cfg(target_arch = "wasm32")]
+const REFRESH_CACHE: Rect = Rect::new(470.0, 578.0, 302.0, 38.0);
 const TITLE_HELP: Rect = Rect::new(81.0, 503.0, 303.0, 43.0);
 
 #[derive(Clone, Copy)]
@@ -223,6 +225,8 @@ pub(crate) struct Screen {
     pub game: Game,
     title: bool,
     has_save: bool,
+    #[cfg(target_arch = "wasm32")]
+    refresh_requested: bool,
     art: Art,
     floor: usize,
     order: Order,
@@ -244,6 +248,8 @@ impl Screen {
             game,
             title: true,
             has_save,
+            #[cfg(target_arch = "wasm32")]
+            refresh_requested: false,
             art: Art {
                 generation: 0,
                 bitmaps: Vec::new(),
@@ -269,6 +275,11 @@ impl Screen {
 
     pub fn should_save(&self) -> bool {
         !self.title
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn take_refresh_request(&mut self) -> bool {
+        std::mem::take(&mut self.refresh_requested)
     }
 
     fn enter_workshop(&mut self) {
@@ -325,6 +336,11 @@ impl Screen {
 
     fn overlay_click(&mut self, overlay: Overlay, x: f32, y: f32) {
         if overlay == Overlay::Help {
+            #[cfg(target_arch = "wasm32")]
+            if REFRESH_CACHE.has(x, y) {
+                self.refresh_requested = true;
+                return;
+            }
             if Rect::new(786.0, 578.0, 147.0, 38.0).has(x, y) {
                 self.overlay = None;
             } else if (!self.title || self.has_save)
@@ -1045,6 +1061,8 @@ impl View<'_> {
                 Rect::new(308.0, y, 617.0, 22.0).label(g, title, Font::Normal, GOLD);
                 Rect::new(308.0, y + 23.0, 617.0, 51.0).label(g, detail, Font::Normal, TEXT);
             }
+            #[cfg(target_arch = "wasm32")]
+            REFRESH_CACHE.button(g, "キャッシュを消して再読み込み", false, true);
             if self.can_reset {
                 Rect::new(307.0, 578.0, 150.0, 38.0).button(g, "最初から", false, true);
             }
