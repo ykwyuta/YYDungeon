@@ -1,7 +1,7 @@
 # 画像素材
 
 - YYMythology の `assets/mythology/wild-djinn.png` から氷の主と砂の魔神を切り出しました。
-- YYMythology の `assets/units/` から作業員を流用しました。作業員はゴブリン守備兵に合わせて着色しています。
+- ゴブリン守備兵（`assets/goblin.png`）は組み込み ImageGen による専用スプライトです。
 - YYCrusaders の `assets/map/fort.png` を題字脇に使っています。
 - ゴブリン親方・宝箱・針の罠・氷結の罠は組み込み ImageGen で新規生成しました。透過 PNG をトリミング・縮小し、罠のシートを2つに分けています。
 
@@ -60,3 +60,7 @@ Game asset production: precisely aligned 3 columns x 2 rows sprite atlas on genu
 ### スプライトシート 2
 
 Game asset production: precisely aligned 3 columns x 2 rows sprite atlas on genuine transparent alpha, 3:2 landscape. Exactly six distinct human medieval Japanese RPG adventurers, each FULL BODY and strictly centered within its equally sized grid cell, with generous separation and padding, clear isolated silhouette readable at 25px. Order left to right top then bottom: veteran knight in shining steel armor with tall blue shield; mage in purple cloak with ice-blue glowing crystal staff; ranger in deep forest green coat with recurved longbow; paladin with white-gold plate and luminous shield; swordmaster in black and crimson carrying twin curved swords; legendary hero with white cape, royal blue and gold armor, one lifted radiant sword. Painterly colorful detailed medieval fantasy strategy game style, compact heroic proportions, three-quarter overhead angle from front. No floors, plinths, drop shadows, boxes, borders, writing, extra props or characters. Keep effects inside their respective cell.
+
+## ゴブリン守備兵
+
+Create one isolated full-body goblin dungeon guard sprite for YYDungeon, a Japanese retro fantasy strategy game. A squat unmistakably non-human moss-green goblin with enormous pointed ears, broad nose, two little lower tusks and a scrappy alert expression. He is crouched ready to defend a stone passage, holding a broad beaten-iron round shield with worn burgundy paint and a short knotted wooden cudgel. Worn charcoal leather armor, a small muted red shoulder sash, and rough boots. Bold rounded goblin silhouette, compact limbs, expressive character, three-quarter elevated view facing forward and to the left. Hand-painted painterly medieval game sprite with matte materials, warm amber edge light and cool slate shadows. It must still read at 28 pixels: emphasize the green face and the round shield, avoid fine clutter. Whole figure and both items fit well inside the image, centered and surrounded by completely transparent alpha. No background, no drop shadow, no ground, no text, no lettering, no other figures.
