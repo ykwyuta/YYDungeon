@@ -1,5 +1,6 @@
 use crate::dungeon::{Cell, Floor, Game, Order, Site, ENTRY, RARITIES, THRONE};
 use crate::gfx::{Bitmap, Font, Gfx};
+use crate::monsters::{GOBLIN, MONSTERS, MONSTER_ART, SENTINEL};
 
 const W: f32 = 1240.0;
 const H: f32 = 780.0;
@@ -160,6 +161,7 @@ impl Art {
         self.generation = gfx.d2d_gen;
         self.bitmaps = SPRITES
             .iter()
+            .chain(MONSTER_ART.iter())
             .map(|bytes| {
                 let rgba = image::load_from_memory(bytes).ok()?.into_rgba8();
                 let (w, h) = rgba.dimensions();
@@ -174,6 +176,15 @@ impl Art {
                 Some((gfx.create_bitmap(w, h, &pixels)?, w as f32 / h as f32))
             })
             .collect();
+    }
+
+    fn draw_monster(&self, gfx: &Gfx, id: u8, rect: Rect, alpha: f32) {
+        let sprite = match id {
+            GOBLIN => 2,
+            SENTINEL => 1,
+            _ => SPRITES.len() + id as usize - 2,
+        };
+        self.draw(gfx, sprite, rect, alpha);
     }
 
     fn draw(&self, gfx: &Gfx, id: usize, rect: Rect, alpha: f32) {
@@ -192,6 +203,28 @@ const fn order_row(index: usize) -> Rect {
 const fn rarity_button(index: usize) -> Rect {
     Rect::new(868.0 + index as f32 * 82.0, 574.0, 76.0, 27.0)
 }
+const BESTIARY_CLOSE: Rect = Rect::new(854.0, 652.0, 225.0, 45.0);
+const BESTIARY_BACK: Rect = Rect::new(161.0, 652.0, 107.0, 45.0);
+const BESTIARY_NEXT: Rect = Rect::new(367.0, 652.0, 107.0, 45.0);
+const MONSTERS_PER_PAGE: usize = 10;
+
+fn monster_card(index: usize) -> Rect {
+    Rect::new(
+        161.0 + (index % 2) as f32 * 465.0,
+        232.0 + (index / 2) as f32 * 80.0,
+        453.0,
+        73.0,
+    )
+}
+
+fn next_unlock(development: u32) -> Option<u32> {
+    MONSTERS
+        .iter()
+        .map(|monster| monster.unlock)
+        .filter(|&goal| goal > development)
+        .min()
+}
+
 const HELP: Rect = Rect::new(1118.0, 27.0, 96.0, 40.0);
 const PREVIOUS: Rect = Rect::new(30.0, 124.0, 39.0, 39.0);
 const NEXT: Rect = Rect::new(74.0, 124.0, 39.0, 39.0);
@@ -215,6 +248,7 @@ pub(crate) enum Event {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Overlay {
     Help,
+    Bestiary(usize),
     Descend,
     Defeat,
     Reset,
@@ -303,6 +337,10 @@ impl Screen {
     }
 
     fn select_order(&mut self, order: Order) {
+        if order == Order::Bestiary {
+            self.overlay = Some(Overlay::Bestiary(0));
+            return;
+        }
         self.order = if self.order == order {
             Order::Inspect
         } else {
@@ -335,6 +373,26 @@ impl Screen {
     }
 
     fn overlay_click(&mut self, overlay: Overlay, x: f32, y: f32) {
+        if let Overlay::Bestiary(page) = overlay {
+            if BESTIARY_CLOSE.has(x, y) {
+                self.overlay = None;
+            } else if BESTIARY_BACK.has(x, y) && page > 0 {
+                self.overlay = Some(Overlay::Bestiary(page - 1));
+            } else if BESTIARY_NEXT.has(x, y) && (page + 1) * MONSTERS_PER_PAGE < MONSTERS.len() {
+                self.overlay = Some(Overlay::Bestiary(page + 1));
+            } else if let Some(index) =
+                (0..MONSTERS_PER_PAGE).find(|&index| monster_card(index).has(x, y))
+            {
+                let id = page * MONSTERS_PER_PAGE + index;
+                let monster = &MONSTERS[id];
+                if monster.unlock <= self.game.development && self.live() && !self.game.running() {
+                    self.order = Order::Recruit(id as u8);
+                    self.selected = None;
+                    self.overlay = None;
+                }
+            }
+            return;
+        }
         if overlay == Overlay::Help {
             #[cfg(target_arch = "wasm32")]
             if REFRESH_CACHE.has(x, y) {
@@ -413,6 +471,8 @@ impl Screen {
             if let Err(error) = self.game.heal() {
                 self.notify(error);
             }
+        } else if order_row(2).has(x, y) {
+            self.select_order(Order::Bestiary);
         } else if self.live() && !self.game.running() {
             if let Some(index) = (0..Order::ALL.len()).find(|&i| order_row(i).has(x, y)) {
                 self.select_order(Order::ALL[index]);
@@ -463,6 +523,7 @@ impl Screen {
                     32 => self.game.paused = !self.game.paused,
                     37 => self.switch_floor(self.floor.saturating_sub(1)),
                     39 => self.switch_floor(self.floor + 1),
+                    51 => self.select_order(Order::Bestiary),
                     49..=55 if self.live() && !self.game.running() => {
                         self.select_order(Order::ALL[(key - 49) as usize])
                     }
@@ -753,30 +814,24 @@ impl View<'_> {
                     }
                 }
                 if let Some(site) = floor.site(cell) {
-                    let (sprite, alpha, ink) = match site {
-                        Site::Chest { rarity } => (8, 1.0, RARE[rarity as usize]),
-                        Site::Goblin { hp } => (
-                            2,
-                            if hp == 0 && self.game.running() {
-                                0.32
-                            } else {
-                                1.0
-                            },
-                            TEAL,
-                        ),
-                        Site::Sentinel { hp } => (
-                            1,
-                            if hp == 0 && self.game.running() {
-                                0.32
-                            } else {
-                                1.0
-                            },
-                            GOLD,
-                        ),
-                        Site::Spikes => (9, 1.0, RED),
-                        Site::Frost => (10, 1.0, RARE[2]),
+                    let ink = if let Some((id, hp)) = site.monster() {
+                        let alpha = if hp == 0 && self.game.running() {
+                            0.32
+                        } else {
+                            1.0
+                        };
+                        self.art.draw_monster(g, id, rect.inset(3.0), alpha);
+                        TEAL
+                    } else {
+                        let (sprite, ink) = match site {
+                            Site::Chest { rarity } => (8, RARE[rarity as usize]),
+                            Site::Spikes => (9, RED),
+                            Site::Frost => (10, RARE[2]),
+                            _ => unreachable!(),
+                        };
+                        self.art.draw(g, sprite, rect.inset(3.0), 1.0);
+                        ink
                     };
-                    self.art.draw(g, sprite, rect.inset(3.0), alpha);
                     Rect::new(
                         rect.x + rect.w * 0.27,
                         rect.y + rect.h - 4.0,
@@ -825,8 +880,9 @@ impl View<'_> {
         let detail = if let Some(cell) = highlight {
             let label = match floor.site(cell) {
                 Some(Site::Chest { rarity }) => format!("宝箱・{}", RARITIES[rarity as usize]),
-                Some(Site::Goblin { hp } | Site::Sentinel { hp }) => {
-                    format!("{}　体力 {}", floor.site(cell).unwrap().order().name(), hp)
+                Some(site) if site.monster().is_some() => {
+                    let (id, hp) = site.monster().unwrap();
+                    format!("{}　体力 {}", MONSTERS[id as usize].name, hp)
                 }
                 Some(site) => site.order().name().into(),
                 None if cell == ENTRY => "入口".into(),
@@ -837,6 +893,11 @@ impl View<'_> {
                 }
                 .into(),
                 None if floor.open(cell) => "通路".into(),
+                None if self.order == Order::Dig => floor.dig_development(cell).map_or_else(
+                    || "石壁".into(),
+                    |gain| format!("石壁　掘削で迷宮開発 +{gain}"),
+                ),
+
                 None => "石壁".into(),
             };
             format!("{:02} / {:02}　　{}", cell.x + 1, cell.y + 1, label)
@@ -879,7 +940,10 @@ impl View<'_> {
             Font::Normal,
             TEXT,
         );
-        for (i, order) in Order::ALL.into_iter().enumerate() {
+        for (i, mut order) in Order::ALL.into_iter().enumerate() {
+            if i == 2 && matches!(self.order, Order::Recruit(_)) {
+                order = self.order;
+            }
             let rect = order_row(i);
             let selected = build && self.order == order;
             rect.panel(
@@ -887,9 +951,22 @@ impl View<'_> {
                 if selected { rgb(0x433626) } else { INSET },
                 if selected { GOLD } else { EDGE },
             );
-            let ink = if build { TEXT } else { DIM };
+            let ink = if build || i == 2 { TEXT } else { DIM };
             match i {
-                0..=4 => self.art.draw(
+                2 => {
+                    let id = if let Order::Recruit(id) = order {
+                        id
+                    } else {
+                        2
+                    };
+                    self.art.draw_monster(
+                        g,
+                        id,
+                        Rect::new(rect.x + 6.0, rect.y + 3.0, 29.0, 28.0),
+                        1.0,
+                    );
+                }
+                0 | 1 | 3 | 4 => self.art.draw(
                     g,
                     [8, 2, 1, 9, 10][i],
                     Rect::new(rect.x + 6.0, rect.y + 3.0, 29.0, 28.0),
@@ -913,7 +990,9 @@ impl View<'_> {
             } else {
                 (order.price(), 0)
             };
-            let cost = if order == Order::Remove {
+            let cost = if order == Order::Bestiary {
+                format!("開発 {}", self.game.development)
+            } else if order == Order::Remove {
                 "+5 金貨".into()
             } else if loot > 0 {
                 format!("{} 金 / {} 品", price, loot)
@@ -1046,13 +1125,102 @@ impl View<'_> {
         }
     }
 
+    fn bestiary(&self, g: &mut Gfx, page: usize) {
+        Rect::new(138.0, 78.0, 964.0, 642.0).panel(g, PANEL, GOLD);
+        Rect::new(160.0, 98.0, 920.0, 45.0).label(g, "仲間モンスター図鑑", Font::TitleMid, TEXT);
+        let development = self.game.development;
+        let unlocked = MONSTERS
+            .iter()
+            .filter(|monster| monster.unlock <= development)
+            .count();
+        let goal = next_unlock(development).map_or_else(
+            || "全種解放".into(),
+            |goal| format!("次の解放まで +{}", goal - development),
+        );
+        Rect::new(161.0, 155.0, 915.0, 27.0).label(
+            g,
+            &format!(
+                "迷宮開発 {development}　　仲間 {unlocked}/{}種　　{goal}",
+                MONSTERS.len()
+            ),
+            Font::Big,
+            GOLD,
+        );
+        let detail = if self.live() && !self.game.running() {
+            "通路・分岐・回り道を掘ると開発が進みます。解放済の魔物を選び、空き通路に配置してください。"
+        } else {
+            "配置できるのは運営中のフロアの準備時間です。通路・分岐・回り道を掘ると仲間が増えます。"
+        };
+        Rect::new(161.0, 195.0, 915.0, 24.0).label(g, detail, Font::Normal, DIM);
+        for (index, monster) in MONSTERS[page * MONSTERS_PER_PAGE..][..MONSTERS_PER_PAGE]
+            .iter()
+            .enumerate()
+        {
+            let id = page * MONSTERS_PER_PAGE + index;
+            let rect = monster_card(index);
+            let unlocked = monster.unlock <= development;
+            rect.panel(g, INSET, if unlocked { GOLD } else { EDGE });
+            self.art.draw_monster(
+                g,
+                id as u8,
+                Rect::new(rect.x + 9.0, rect.y + 5.0, 66.0, 61.0),
+                if unlocked { 1.0 } else { 0.48 },
+            );
+            Rect::new(rect.x + 82.0, rect.y + 8.0, 350.0, 25.0).label(
+                g,
+                monster.name,
+                Font::Big,
+                if unlocked { TEXT } else { DIM },
+            );
+            let stats = format!(
+                "{}　攻撃{} / HP{}　　{}",
+                monster.tactic.label(),
+                monster.damage,
+                monster.hp,
+                if unlocked {
+                    format!("金貨{}・骨材{}", monster.gold, monster.bones)
+                } else {
+                    format!("開発{}で解放", monster.unlock)
+                }
+            );
+            Rect::new(rect.x + 82.0, rect.y + 42.0, 350.0, 22.0).label(
+                g,
+                &stats,
+                Font::Normal,
+                if unlocked { TEAL } else { DIM },
+            );
+        }
+        BESTIARY_BACK.button(g, "前へ", false, page > 0);
+        BESTIARY_NEXT.button(
+            g,
+            "次へ",
+            false,
+            (page + 1) * MONSTERS_PER_PAGE < MONSTERS.len(),
+        );
+        Rect::new(276.0, 652.0, 83.0, 45.0).label(
+            g,
+            &format!(
+                "{}/{}",
+                page + 1,
+                MONSTERS.len().div_ceil(MONSTERS_PER_PAGE)
+            ),
+            Font::NormalCenter,
+            DIM,
+        );
+        BESTIARY_CLOSE.button(g, "閉じる　Esc", true, true);
+    }
+
     fn overlay(&self, g: &mut Gfx, overlay: Overlay) {
         Rect::new(0.0, 0.0, W, H).fill(g, [0.025, 0.04, 0.065, 0.86]);
+        if let Overlay::Bestiary(page) = overlay {
+            self.bestiary(g, page);
+            return;
+        }
         if overlay == Overlay::Help {
             Rect::new(283.0, 144.0, 674.0, 492.0).panel(g, PANEL, GOLD);
             Rect::new(304.0, 167.0, 632.0, 51.0).label(g, "迷宮工房の遊び方", Font::TitleMid, TEXT);
             for (i, (title, detail)) in [
-                ("建設", "右の指示を選び、迷路の区画を押すとゴブリンが作業します。針の罠と魔物は、冒険者が通る床へ。"),
+                ("建設", "右の指示を選び、迷路の区画を押すとゴブリンが作業します。分岐や回り道を掘ると、図鑑から新しい魔物を配置できます。"),
                 ("おびき寄せる", "宝箱が多いほど冒険者が増えます。レアな品を入れると、強敵と引き換えに撃退報酬が増えます。"),
                 ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨、死体の骨材、持ち物を回収します。玉座の主が倒されると陥落します。"),
                 ("拡張と委任", "撃退で迷路・建設予算・配置枠が増えます。新しい階へ移ると、前の階を中ボスに任せられます。一定レベル以上の敵は新しい階まで来ます。"),
@@ -1074,7 +1242,7 @@ impl View<'_> {
             Overlay::Descend => ("新しいフロア", format!("金貨140と骨材8を使い、地下{}階を掘ります。前の階を任せると中ボスが迎撃し、Lv.{}以上の冒険者は次の階へ通します。", self.game.floors.len() + 1, self.floor().pass_level())),
             Overlay::Reset => ("最初から始める", "現在の迷宮と進行記録を消去して、地下1階から始めます。".into()),
             Overlay::Defeat => ("迷宮陥落", format!("氷の主が倒されました。第{}波・累計撃退{}人・地下{}階", self.game.wave, self.game.kills, self.game.floors.len())),
-            Overlay::Help => unreachable!(),
+            Overlay::Help | Overlay::Bestiary(_) => unreachable!(),
         };
         Rect::new(306.0, 286.0, 628.0, 52.0).label(
             g,

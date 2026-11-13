@@ -105,7 +105,9 @@ fn construction_checks_walls_resources_and_running_raids() {
     let cell = Cell { x: 3, y: 3 };
     assert!(game.place(Order::Spikes, cell, 0).is_err());
     assert!(game.place(Order::Dig, ENTRY, 0).is_err());
-    assert!(game.place(Order::Sentinel, Cell { x: 1, y: 2 }, 0).is_err());
+    assert!(game
+        .place(Order::Recruit(SENTINEL), Cell { x: 1, y: 2 }, 0)
+        .is_err());
     game.place(Order::Dig, cell, 0).unwrap();
     game.place(Order::Spikes, cell, 0).unwrap();
     game.begin_raid();
@@ -132,4 +134,55 @@ fn a_prepared_first_floor_can_earn_and_open_the_second_floor() {
         }
     }
     panic!("only {} adventurers defeated", game.kills);
+}
+
+#[test]
+fn digging_branches_and_loops_unlocks_monsters_and_survives_old_saves() {
+    let mut game = Game::new();
+    let branch = Cell { x: 3, y: 3 };
+    let room = Cell { x: 4, y: 3 };
+    assert!(game.place(Order::Recruit(4), room, 0).is_err());
+    game.place(Order::Dig, branch, 0).unwrap();
+    assert!(
+        game.development >= 3,
+        "loop should be worth extra development"
+    );
+    game.place(Order::Recruit(4), room, 0).unwrap();
+    assert_eq!(game.floor().site(room).unwrap().monster().unwrap().0, 4);
+    let score = game.development;
+    assert!(game.place(Order::Dig, branch, 0).is_err());
+    assert_eq!(game.development, score);
+    assert_eq!(Game::load(&game.save()).unwrap().development, score);
+
+    game.active().sites[room.index()] = None;
+    let mut legacy = serde_json::from_slice::<serde_json::Value>(&game.save()).unwrap();
+    legacy[1].as_object_mut().unwrap().remove("development");
+    let restored = Game::load(&serde_json::to_vec(&legacy).unwrap()).unwrap();
+    assert_eq!(restored.development, score);
+    assert_eq!(
+        restored
+            .floor()
+            .site(Cell { x: 2, y: 4 })
+            .unwrap()
+            .monster(),
+        Some((GOBLIN, 38))
+    );
+}
+
+#[test]
+fn all_monsters_are_earnable_on_a_developed_floor() {
+    let mut game = Game::new();
+    game.gold = 10000;
+    game.active().expand();
+    game.active().expand();
+    for _ in 0..WIDTH {
+        for y in 1..HEIGHT - 1 {
+            for x in 1..WIDTH - 1 {
+                let _ = game.place(Order::Dig, Cell { x, y }, 0);
+            }
+        }
+    }
+    assert!(MONSTERS
+        .iter()
+        .all(|monster| game.development >= monster.unlock));
 }

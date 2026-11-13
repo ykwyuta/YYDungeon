@@ -1,4 +1,5 @@
 mod dungeon;
+mod monsters;
 
 #[cfg(any(windows, target_arch = "wasm32"))]
 mod screen;

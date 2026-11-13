@@ -28,3 +28,23 @@ Wide 16:9 cover illustration for Japanese retro fantasy dungeon management game 
 ### アプリアイコン
 
 Original square app icon for a medieval dark fantasy Japanese dungeon builder. A single striking mark: a glowing amber treasure chest recessed into a stylized stone labyrinth entrance, with the maze walls wrapping around three sides in a symmetrical chunky single glyph. Deep midnight navy and cool slate blue stone, antique gold light, subtle hand-painted texture, strong high contrast silhouette and large simplified shapes easily readable at 16px. Centered icon on a solid midnight navy square background, artwork limited to central 65 percent so platform mask safe, no lettering, no words, no numbers, no symbols outside the motif, no border. Square app icon ready for Windows ICO and browser favicon.
+
+## 仲間モンスター38種
+
+組み込み ImageGen で新しい魔物4枚のスプライトシートを作成しました。各マスを切り出し、透過の縁と白いかぶりを整理して最大96pxのPNGにしています。
+
+### スプライトシート 1
+
+A game sprite atlas, 5 columns and 2 rows, landscape 5:2 ratio; each of the ten equal square cells (precise separated regular grid) contains ONE unique small sprite centered with ample empty transparent margins on all sides, silhouettes never cross cell boundaries. Read left to right, top then bottom: blue slime, tiny bat, baby mandrake, spider with violet abdomen, mushroom imp, kobold, bone soldier, flame wisp, baby mimic chest, white ghost. Illustrated Japanese dark fantasy strategy dungeon creatures, sophisticated hand-painted shaded forms, 3/4 top-down sprites, visible full bodies, varied strong silhouettes readable at 32px. Actual alpha transparency, no backgrounds or drop shadows, no labels, no text, no visible lines, no frames. The creatures occupy 60% of their assigned cell so sprites can be cropped programmatically. Strictly honor the roster order.
+
+### スプライトシート 2
+
+A game sprite atlas, 5 columns and 2 rows, landscape 5:2 ratio; each of the ten equal square cells (precise separated regular grid) contains ONE unique small sprite centered with ample empty transparent margins on all sides, silhouettes never cross cell boundaries. Read left to right, top then bottom: dire wolf, stone golem, fairy, lizardman, harpy, red orc, basilisk, ice elemental, cyclops, minotaur. Illustrated Japanese dark fantasy strategy dungeon creatures, sophisticated hand-painted shaded forms, 3/4 top-down sprites, visible full bodies, varied strong silhouettes readable at 32px. Actual alpha transparency, no backgrounds or drop shadows, no labels, no text, no visible lines, no frames. The creatures occupy 60% of their assigned cell so sprites can be cropped programmatically. Strictly honor the roster order.
+
+### スプライトシート 3
+
+A game sprite atlas, 5 columns and 2 rows, landscape 5:2 ratio; each of the ten equal square cells (precise separated regular grid) contains ONE unique small sprite centered with ample empty transparent margins on all sides, silhouettes never cross cell boundaries. Read left to right, top then bottom: gargoyle, mummy, succubus, living armor, cerberus, vampire, dullahan, salamander, frost wolf, wyvern. Illustrated Japanese dark fantasy strategy dungeon creatures, sophisticated hand-painted shaded forms, 3/4 top-down sprites, visible full bodies, varied strong silhouettes readable at 32px. Actual alpha transparency, no backgrounds or drop shadows, no labels, no text, no visible lines, no frames. The creatures occupy 60% of their assigned cell so sprites can be cropped programmatically. Strictly honor the roster order.
+
+### スプライトシート 4
+
+A game sprite atlas, 5 columns and 2 rows, landscape 5:2 ratio; each of the ten equal square cells (precise separated regular grid) contains ONE unique small sprite centered with ample empty transparent margins on all sides, silhouettes never cross cell boundaries. Read left to right, top then bottom: chimera, hydra, phoenix, lich, ruby red dragon, azure frost dragon, gold thunder dragon, dark void dragon, then leave the last two cells empty. Illustrated Japanese dark fantasy strategy dungeon creatures, sophisticated hand-painted shaded forms, 3/4 top-down sprites, visible full bodies, varied strong silhouettes readable at 32px. Actual alpha transparency, no backgrounds or drop shadows, no labels, no text, no visible lines, no frames. The creatures occupy 60% of their assigned cell so sprites can be cropped programmatically. Strictly honor the roster order.

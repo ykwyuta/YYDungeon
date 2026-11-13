@@ -1,3 +1,4 @@
+use crate::monsters::{Monster, Tactic, GOBLIN, MONSTERS, SENTINEL};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
@@ -9,6 +10,10 @@ pub const PREPARE: f32 = 42.0;
 pub const MAX_FLOORS: usize = 100;
 const STEP: f32 = 0.33;
 const RAID_MAX: usize = 32;
+
+fn missing_development() -> u32 {
+    u32::MAX
+}
 pub const SAVE_LIMIT: usize = 300_000;
 const INITIAL: [&str; 9] = [
     "#############",
@@ -52,6 +57,7 @@ pub enum Site {
     Chest { rarity: u8 },
     Goblin { hp: u16 },
     Sentinel { hp: u16 },
+    Monster { id: u8, hp: u16 },
     Spikes,
     Frost,
 }
@@ -61,7 +67,8 @@ pub enum Order {
     Inspect,
     Chest,
     Goblin,
-    Sentinel,
+    Bestiary,
+    Recruit(u8),
     Spikes,
     Frost,
     Dig,
@@ -72,7 +79,7 @@ impl Order {
     pub const ALL: [Self; 7] = [
         Self::Chest,
         Self::Goblin,
-        Self::Sentinel,
+        Self::Bestiary,
         Self::Spikes,
         Self::Frost,
         Self::Dig,
@@ -84,7 +91,8 @@ impl Order {
             Self::Inspect => "調べる",
             Self::Chest => "宝箱",
             Self::Goblin => "ゴブリン",
-            Self::Sentinel => "砂の魔神",
+            Self::Bestiary => "仲間モンスター図鑑",
+            Self::Recruit(id) => MONSTERS[id as usize].name,
             Self::Spikes => "針の罠",
             Self::Frost => "氷結の罠",
             Self::Dig => "掘削",
@@ -97,7 +105,8 @@ impl Order {
             Self::Inspect | Self::Remove => 0,
             Self::Chest => 30,
             Self::Goblin => 28,
-            Self::Sentinel => 66,
+            Self::Bestiary => 0,
+            Self::Recruit(id) => MONSTERS[id as usize].gold,
             Self::Spikes => 19,
             Self::Frost => 38,
             Self::Dig => 14,
@@ -106,7 +115,7 @@ impl Order {
 
     pub fn bones(self) -> u32 {
         match self {
-            Self::Sentinel => 3,
+            Self::Recruit(id) => MONSTERS[id as usize].bones,
             Self::Frost => 1,
             _ => 0,
         }
@@ -117,7 +126,8 @@ impl Order {
             Self::Inspect => "床や壁を選ぶと、その区画の情報を確認できます。",
             Self::Chest => "宝箱が多いほど、次の襲撃に来る冒険者が増えます。",
             Self::Goblin => "通過する冒険者を攻撃します。交戦で消耗します。",
-            Self::Sentinel => "ゴブリンより強く、複数の冒険者と交戦できます。",
+            Self::Bestiary => "迷路を掘って、新しい魔物を仲間にできます。",
+            Self::Recruit(_) => "空いている通路を選ぶと、仲間を配置します。",
             Self::Spikes => "踏んだ冒険者に12ダメージを与えます。",
             Self::Frost => "8ダメージを与え、冒険者を2手止めます。",
             Self::Dig => "通路に接した内壁を掘り、迷路に新しい道を作ります。",
@@ -129,7 +139,10 @@ impl Order {
         Some(match self {
             Self::Chest => Site::Chest { rarity },
             Self::Goblin => Site::Goblin { hp: 38 },
-            Self::Sentinel => Site::Sentinel { hp: 72 },
+            Self::Recruit(id) => Site::Monster {
+                id,
+                hp: MONSTERS.get(id as usize)?.hp,
+            },
             Self::Spikes => Site::Spikes,
             Self::Frost => Site::Frost,
             _ => return None,
@@ -142,14 +155,33 @@ impl Site {
         match self {
             Self::Chest { .. } => Order::Chest,
             Self::Goblin { .. } => Order::Goblin,
-            Self::Sentinel { .. } => Order::Sentinel,
+            Self::Sentinel { .. } => Order::Recruit(SENTINEL),
+            Self::Monster { id, .. } => Order::Recruit(id),
             Self::Spikes => Order::Spikes,
             Self::Frost => Order::Frost,
         }
     }
 
+    pub fn monster(self) -> Option<(u8, u16)> {
+        match self {
+            Self::Goblin { hp } => Some((GOBLIN, hp)),
+            Self::Sentinel { hp } => Some((SENTINEL, hp)),
+            Self::Monster { id, hp } => Some((id, hp)),
+            _ => None,
+        }
+    }
+
     fn is_monster(self) -> bool {
-        matches!(self, Self::Goblin { .. } | Self::Sentinel { .. })
+        self.monster().is_some()
+    }
+
+    fn monster_hp_mut(&mut self) -> Option<(&mut u16, Monster)> {
+        let id = self.monster()?.0;
+        let hp = match self {
+            Self::Goblin { hp } | Self::Sentinel { hp } | Self::Monster { hp, .. } => hp,
+            _ => return None,
+        };
+        Some((hp, MONSTERS[id as usize]))
     }
 
     fn is_trap(self) -> bool {
@@ -290,6 +322,50 @@ impl Floor {
         None
     }
 
+    pub fn dig_development(&self, cell: Cell) -> Option<u32> {
+        let (w, h) = self.size();
+        if cell.x == 0 || cell.y == 0 || cell.x >= w - 1 || cell.y >= h - 1 || self.open(cell) {
+            return None;
+        }
+        let adjacent: Vec<_> = cell.neighbors().filter(|&next| self.open(next)).collect();
+        if adjacent.is_empty() {
+            return None;
+        }
+        let links = adjacent.len() as u32;
+        let new_branches = adjacent
+            .iter()
+            .filter(|&&next| {
+                next.neighbors()
+                    .filter(|&neighbor| self.open(neighbor))
+                    .count()
+                    >= 2
+            })
+            .count() as u32
+            + links.saturating_sub(2);
+        Some(1 + new_branches + 2 * (links - 1))
+    }
+
+    fn complexity(&self) -> u32 {
+        let mut rooms = 0;
+        let mut edges = 0;
+        let mut branches = 0;
+        for (index, open) in self.open.iter().enumerate() {
+            if !open {
+                continue;
+            }
+            let cell = Cell {
+                x: index % WIDTH,
+                y: index / WIDTH,
+            };
+            let degree = cell.neighbors().filter(|&next| self.open(next)).count() as u32;
+            rooms += 1;
+            edges += degree;
+            branches += degree.saturating_sub(2);
+        }
+        // Every extra edge beyond a spanning tree adds an independent loop.
+        rooms + branches + 2 * (edges / 2 + 1).saturating_sub(rooms)
+    }
+
     pub fn next_goal(&self) -> u32 {
         match self.tier {
             1 => 6,
@@ -336,6 +412,8 @@ pub struct Invader {
     route: Vec<Cell>,
     step: usize,
     freeze: u8,
+    #[serde(default)]
+    poison: u8,
     chest: Option<Cell>,
     looted: bool,
     fought: Vec<Cell>,
@@ -353,6 +431,8 @@ struct Raid {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Game {
     pub floors: Vec<Floor>,
+    #[serde(default = "missing_development")]
+    pub development: u32,
     pub gold: u32,
     pub bones: u32,
     pub loot: u32,
@@ -379,6 +459,7 @@ impl Game {
         }
         Self {
             floors: vec![floor],
+            development: 0,
             gold: 170,
             bones: 0,
             loot: 0,
@@ -434,6 +515,14 @@ impl Game {
         if self.defeated || self.running() {
             return Err("建設は襲撃と襲撃の間にできます。");
         }
+        if let Order::Recruit(id) = order {
+            let monster = MONSTERS
+                .get(id as usize)
+                .ok_or("その魔物は見つかりません。")?;
+            if monster.unlock > self.development {
+                return Err("迷路を開発して、この魔物を仲間にしてください。");
+            }
+        }
         if !self.floor().contains(cell) || cell == ENTRY || cell == THRONE {
             return Err("ここは工事できません。");
         }
@@ -452,15 +541,31 @@ impl Game {
             if cell.x == 0 || cell.y == 0 || cell.x == w - 1 || cell.y == h - 1 {
                 return Err("フロアの外壁は掘れません。");
             }
-            if self.floor().open(cell) || !cell.neighbors().any(|next| self.floor().open(next)) {
-                return Err("通路につながっている内壁を選んでください。");
-            }
+            let gain = self
+                .floor()
+                .dig_development(cell)
+                .ok_or("通路につながっている内壁を選んでください。")?;
             if self.gold < order.price() {
                 return Err("金貨が足りません。");
             }
             self.gold -= order.price();
             self.active().open[cell.index()] = true;
-            self.message("ゴブリンが岩を掘り、新しい通路を開きました。");
+            let unlocked = MONSTERS
+                .iter()
+                .filter(|monster| {
+                    monster.unlock > self.development && monster.unlock <= self.development + gain
+                })
+                .map(|monster| monster.name)
+                .collect::<Vec<_>>();
+            self.development += gain;
+            if unlocked.is_empty() {
+                self.message(format!("ゴブリンが通路を掘りました。迷宮開発 +{gain}"));
+            } else {
+                self.message(format!(
+                    "迷宮開発 +{gain}　仲間にできる魔物：{}",
+                    unlocked.join("、")
+                ));
+            }
             return Ok(());
         }
         if !self.floor().open(cell) {
@@ -671,9 +776,11 @@ impl Game {
         }
         for site in self.active().sites.iter_mut().flatten() {
             match site {
-                Site::Goblin { hp } => *hp = 38,
-                Site::Sentinel { hp } => *hp = 72,
-                _ => {}
+                site => {
+                    if let Some((hp, monster)) = site.monster_hp_mut() {
+                        *hp = monster.hp;
+                    }
+                }
             }
         }
         let mut raid = Raid {
@@ -731,6 +838,7 @@ impl Game {
             route,
             step: 0,
             freeze: 0,
+            poison: 0,
             chest,
             looted: false,
             fought: Vec::new(),
@@ -738,6 +846,13 @@ impl Game {
     }
 
     fn move_invader(&mut self, invader: &mut Invader) -> bool {
+        if invader.poison > 0 {
+            invader.poison -= 1;
+            invader.hp -= 4;
+            if invader.hp <= 0 {
+                return false;
+            }
+        }
         if invader.freeze > 0 {
             invader.freeze -= 1;
             return true;
@@ -754,15 +869,30 @@ impl Game {
                     invader.hp -= 8;
                     invader.freeze = 2;
                 }
-                Some(site @ (Site::Goblin { .. } | Site::Sentinel { .. })) => {
-                    let (hp, strength) = match site {
-                        Site::Goblin { hp } => (hp, 21),
-                        Site::Sentinel { hp } => (hp, 30),
-                        _ => unreachable!(),
-                    };
-                    if *hp > 0 {
-                        invader.hp -= strength.min(8 + *hp as i32);
-                        *hp = hp.saturating_sub(6 + 3 * invader.level as u16);
+                Some(site) => {
+                    if let Some((hp, monster)) = site.monster_hp_mut() {
+                        if *hp > 0 {
+                            let retaliation = 6 + 3 * invader.level as u16;
+                            let bonus = match monster.tactic {
+                                Tactic::Ambush if invader.hp == invader.max_hp => 10,
+                                Tactic::Venom => {
+                                    invader.poison = invader.poison.max(3);
+                                    0
+                                }
+                                Tactic::Snare => {
+                                    invader.freeze = 2;
+                                    0
+                                }
+                                _ => 0,
+                            };
+                            invader.hp -= monster.damage.min(8 + *hp as i32) + bonus;
+                            let damage = if monster.tactic == Tactic::Guard {
+                                retaliation.div_ceil(2)
+                            } else {
+                                retaliation
+                            };
+                            *hp = hp.saturating_sub(damage);
+                        }
                     }
                 }
                 _ => {}
@@ -853,8 +983,29 @@ impl Game {
         if bytes.len() > SAVE_LIMIT {
             return None;
         }
-        let (version, game): (u8, Self) = serde_json::from_slice(bytes).ok()?;
-        (version == 1 && game.valid()).then_some(game)
+        let (version, mut game): (u8, Self) = serde_json::from_slice(bytes).ok()?;
+        if game.development == missing_development() {
+            game.development = 0;
+            if !game.valid() {
+                return None;
+            }
+            game.development = game
+                .floors
+                .iter()
+                .enumerate()
+                .map(|(depth, floor)| {
+                    let mut natural = Floor::new(depth);
+                    while natural.tier < floor.tier {
+                        natural.expand();
+                    }
+                    floor.complexity().saturating_sub(natural.complexity())
+                })
+                .sum();
+        }
+        if version != 1 || !game.valid() {
+            return None;
+        }
+        Some(game)
     }
 
     fn valid(&self) -> bool {
@@ -865,6 +1016,7 @@ impl Game {
             || [self.gold, self.bones, self.loot, self.kills, self.wave]
                 .into_iter()
                 .any(|value| value > 1_000_000_000)
+            || self.development > 100_000
             || self.defeated != (self.boss == 0)
         {
             return false;
@@ -891,6 +1043,7 @@ impl Game {
                         || cell == THRONE
                         || floor.route(ENTRY, cell).is_none()
                         || matches!(site, Site::Chest { rarity } if *rarity > floor.rarity_limit())
+                        || matches!(site, Site::Monster { id, hp } if MONSTERS.get(*id as usize).is_none_or(|monster| *hp > monster.hp || monster.unlock > self.development))
                     {
                         return false;
                     }
@@ -926,6 +1079,7 @@ impl Game {
                             invader.chest.unwrap_or(THRONE)
                         })
                     && invader.fought.len() <= WIDTH * HEIGHT
+                    && invader.poison <= 3
             })
     }
 }

@@ -28,7 +28,7 @@ wasm.yy_frame(0.25, 1);
 assert.ok(labels.has("はじめる　 [Enter]"));
 assert.equal(wasm.yy_can_autosave(), 0);
 assert.equal(game().countdown, 42);
-assert.equal(sprites, 12);
+assert.equal(sprites, 50);
 wasm.yy_event(2, 112, 0);
 wasm.yy_frame(0, 1);
 assert.ok(labels.has("キャッシュを消して再読み込み"));
@@ -42,6 +42,15 @@ wasm.yy_frame(0, 1);
 assert.equal(wasm.yy_can_autosave(), 1);
 assert.equal(game().wave, 0);
 assert.ok(draws > 100);
+
+wasm.yy_event(2, 51, 0); // 3 opens the monster roster.
+wasm.yy_frame(0, 1);
+assert.ok(labels.has("仲間モンスター図鑑") && labels.has("スライム"));
+for (let i = 0; i < 3; i++) wasm.yy_event(1, 420, 671);
+wasm.yy_frame(0, 1);
+assert.ok(labels.has("深淵竜"));
+wasm.yy_event(2, 27, 0);
+wasm.yy_frame(0, 1);
 
 // Mouse placement through the shared screen, then keyboard starts the wave.
 wasm.yy_event(1, 980, 406);
@@ -71,3 +80,14 @@ wasm.yy_frame(0, 1);
 assert.equal(wasm.yy_can_autosave(), 1);
 assert.deepEqual(game(), played);
 console.log("Wasm renders, accepts construction orders, resolves a raid and resumes the saved game.");
+
+// Dig the wall at (3, 3) and select the newly unlocked mandrake from the roster.
+wasm.yy_event(2, 54, 0);
+wasm.yy_event(1, 289, 352);
+wasm.yy_frame(0, 1);
+assert.ok(game().development >= 3);
+wasm.yy_event(2, 51, 0);
+wasm.yy_event(1, 270, 425);
+wasm.yy_event(1, 335, 352);
+wasm.yy_frame(0, 1);
+assert.ok(game().floors[0].sites.some(site => site?.Monster?.id === 4));
