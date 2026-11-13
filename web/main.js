@@ -1,5 +1,6 @@
 const canvas = document.getElementById("game");
 const status = document.getElementById("status");
+const portraitTouch = matchMedia("(orientation: portrait) and (pointer: coarse)");
 const ctx = canvas.getContext("2d", { alpha: false });
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -178,7 +179,7 @@ async function main() {
     wasm.yy_event(1, ...point(event));
   });
   window.addEventListener("keydown", event => {
-    if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (portraitTouch.matches || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
     if ([13, 27, 32, 37, 39, 49, 50, 51, 52, 53, 54, 55, 112, 122].includes(event.keyCode)) {
       event.preventDefault();
       if (event.keyCode === 122) fullscreen();
@@ -190,7 +191,8 @@ async function main() {
   let last = performance.now();
   let saved = last;
   function frame(now) {
-    wasm.yy_frame(Math.min(0.25, (now - last) / 1000), Number(!document.hidden && document.hasFocus()));
+    const active = !portraitTouch.matches && !document.hidden && document.hasFocus();
+    wasm.yy_frame(Math.min(0.25, (now - last) / 1000), Number(active));
     last = now;
     if (now - saved >= 2000) {
       save();

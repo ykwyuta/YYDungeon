@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#10151e">
   <meta name="description" content="ゴブリンに指示を出し、罠と魔物で冒険者を迎え撃つダンジョン運営ゲーム。">
   <title>迷宮工房 · YYDungeon</title>
@@ -11,18 +11,45 @@
   <link rel="manifest" href="manifest.webmanifest">
   <style>
     html, body { margin: 0; width: 100%; height: 100%; background: #10151e; color: #f4ebdb; }
-    body { display: grid; place-items: center; font: 16px "Yu Gothic UI", system-ui, sans-serif; }
-    canvas { display: block; width: 100%; height: 100dvh; touch-action: none; }
+    body {
+      display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center;
+      box-sizing: border-box; height: 100vh; height: 100dvh; overflow: hidden;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right)
+        env(safe-area-inset-bottom) env(safe-area-inset-left);
+      font: 16px "Yu Gothic UI", system-ui, sans-serif;
+    }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
     #status { position: fixed; margin: 24px; max-width: 480px; line-height: 1.6; }
-    @media (orientation: portrait) and (max-width: 600px) {
-      canvas { min-width: 720px; min-height: 470px; touch-action: pan-x pan-y; }
-      body { display: block; overflow: auto; }
+    #rotate {
+      display: none; position: fixed; inset: 0; z-index: 10;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 28px; padding: 24px; text-align: center; color: #f4ebdb;
+      font-size: 18px; background: radial-gradient(ellipse, #253242, #10151e 70%);
+    }
+    #rotate .phone {
+      width: 44px; height: 76px; border: 3px solid #e4ba75; border-radius: 8px;
+      animation: rotate-phone 2.4s ease-in-out infinite;
+    }
+    @keyframes rotate-phone {
+      0%, 25% { transform: rotate(0); }
+      55%, 100% { transform: rotate(-90deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #rotate .phone { animation: none; transform: rotate(-90deg); }
+    }
+    @media (orientation: portrait) and (pointer: coarse) {
+      #rotate { display: flex; }
+      #game, #status { visibility: hidden; }
     }
   </style>
 </head>
 <body>
   <canvas id="game" tabindex="0" aria-label="迷宮工房のゲーム画面">Canvas 2D に対応したブラウザで開いてください。</canvas>
   <p id="status" role="status">迷宮を読み込んでいます…</p>
+  <div id="rotate">
+    <div class="phone" aria-hidden="true"></div>
+    <div>画面を横向きにしてお遊びください</div>
+  </div>
   <script defer src="main.js"></script>
 </body>
 </html>

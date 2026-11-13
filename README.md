@@ -18,7 +18,7 @@ node tools/build.mjs
 python -m http.server 8765 --bind 127.0.0.1 --directory dist
 ```
 
-[http://127.0.0.1:8765/](http://127.0.0.1:8765/) を開きます。GitHub Actions からも Windows の実行ファイルとブラウザ用の静的ファイルを取得できます。
+[http://127.0.0.1:8765/](http://127.0.0.1:8765/) を開きます。スマートフォン・タブレットでは横向きで遊べます。GitHub Actions からも Windows の実行ファイルとブラウザ用の静的ファイルを取得できます。
 
 ## Cloudflare 配信
 
