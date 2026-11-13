@@ -55,6 +55,9 @@ fn maze_expansion_and_delegation_keep_a_route_to_the_throne() {
     assert!(game.floor().monster_limit() > 3 && game.floor().chest_limit() > 2);
     game.place(Order::Chest, Cell { x: 10, y: 7 }, 3).unwrap();
     game.descend(true).unwrap();
+    game.active().expand();
+    game.active().expand();
+    game.place(Order::Chest, Cell { x: 10, y: 7 }, 3).unwrap();
     assert!(game.floors[0].steward);
     assert!(game.floor().route(ENTRY, THRONE).is_some());
     game.begin_raid();
@@ -72,6 +75,7 @@ fn a_steward_stops_weak_invaders_upstairs() {
     game.finish_raid();
     game.descend(false).unwrap();
     game.toggle_steward(0).unwrap();
+    game.place(Order::Chest, Cell { x: 10, y: 7 }, 0).unwrap();
     game.begin_raid();
     assert!(game.floors[0].earned() > 20);
     assert_eq!(game.floor().earned(), 0);
@@ -83,6 +87,7 @@ fn defeat_ends_the_raid_and_mid_raid_saves_resume() {
     for site in &mut game.active().sites {
         *site = None;
     }
+    game.place(Order::Chest, Cell { x: 10, y: 7 }, 0).unwrap();
     game.boss = 1;
     game.begin_raid();
     for _ in 0..7 {
@@ -122,6 +127,12 @@ fn a_prepared_first_floor_can_earn_and_open_the_second_floor() {
     game.place(Order::Goblin, Cell { x: 4, y: 5 }, 0).unwrap();
     game.place(Order::Chest, Cell { x: 9, y: 7 }, 0).unwrap();
     for _ in 0..7 {
+        for x in [9, 10] {
+            let cell = Cell { x, y: 7 };
+            if game.floor().site(cell).is_none() {
+                game.place(Order::Chest, cell, 0).unwrap();
+            }
+        }
         game.begin_raid();
         settle(&mut game);
         assert!(!game.defeated);
@@ -267,4 +278,82 @@ fn melee_paces_attacks_and_preserves_health_when_resuming_mid_fight() {
     assert_eq!(game.save(), restored.save());
     settle(&mut restored);
     assert_eq!(restored.kills, 3);
+}
+
+#[test]
+fn opening_the_last_chest_stops_new_raids_until_it_is_replaced() {
+    let mut game = Game::new();
+    let chest = Cell { x: 10, y: 7 };
+    for site in &mut game.active().sites {
+        if !matches!(site, Some(Site::Chest { .. })) {
+            *site = None;
+        }
+    }
+    game.begin_raid();
+    for _ in 0..150 {
+        game.tick(0.25);
+        if game.floor().site(chest).is_none() {
+            break;
+        }
+    }
+    assert_eq!(game.floor().site(chest), None);
+    assert_eq!(game.forecast(), (0, 0));
+    assert!(game.running());
+    assert_eq!(
+        game.invaders()
+            .iter()
+            .filter(|invader| invader.looted)
+            .count(),
+        1
+    );
+
+    let mut game = Game::load(&game.save()).unwrap();
+    settle(&mut game);
+    assert!(!game.defeated);
+    game.begin_raid();
+    for _ in 0..(PREPARE * 4.0) as usize + 4 {
+        game.tick(0.25);
+    }
+    assert_eq!(game.wave, 1);
+    assert_eq!(game.countdown, PREPARE);
+    assert!(!game.running());
+
+    game.place(Order::Chest, chest, 0).unwrap();
+    for _ in 0..(PREPARE * 4.0) as usize {
+        game.tick(0.25);
+    }
+    assert_eq!(game.wave, 2);
+    assert!(game.running());
+}
+
+#[test]
+fn adventurers_retarget_an_unopened_chest_and_leave_upper_floors_out_of_the_forecast() {
+    let mut game = Game::new();
+    let first = Cell { x: 10, y: 7 };
+    let second = Cell { x: 9, y: 7 };
+    game.place(Order::Chest, second, 0).unwrap();
+    game.begin_raid();
+    let mut adventurer = game.invaders()[0].clone();
+    adventurer.chest = Some(first);
+    adventurer.route = vec![first];
+    adventurer.cell = first;
+    assert!(game.move_invader(&mut adventurer));
+    assert!(adventurer.looted);
+    assert!(game.floor().site(first).is_none());
+    assert!(matches!(
+        game.floor().site(second),
+        Some(Site::Chest { .. })
+    ));
+
+    adventurer.looted = false;
+    adventurer.chest = Some(first);
+    adventurer.route = vec![first];
+    assert!(game.move_invader(&mut adventurer));
+    assert!(!adventurer.looted);
+    assert_eq!(adventurer.chest, Some(second));
+    assert_eq!(adventurer.route.last(), Some(&second));
+
+    let new_floor = Floor::new(1);
+    game.floors.push(new_floor);
+    assert_eq!(game.forecast(), (0, 0));
 }

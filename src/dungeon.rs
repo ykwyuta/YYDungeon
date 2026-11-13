@@ -129,7 +129,7 @@ impl Order {
     pub fn description(self) -> &'static str {
         match self {
             Self::Inspect => "床や壁を選ぶと、その区画の情報を確認できます。",
-            Self::Chest => "宝箱が多いほど、次の襲撃に来る冒険者が増えます。",
+            Self::Chest => "冒険者が開けると宝箱は消えます。宝箱がある間は襲撃が来ます。",
             Self::Goblin => "通路で冒険者を足止めし、数回攻防します。",
             Self::Bestiary => "迷路を掘って、新しい魔物を仲間にできます。",
             Self::Recruit(_) => "空いている通路を選ぶと、仲間を配置します。",
@@ -628,24 +628,27 @@ impl Game {
         self.gold -= gold;
         self.bones -= order.bones();
         self.loot -= loot;
+        if order == Order::Chest && self.floor().chest_count() == 0 {
+            self.countdown = PREPARE;
+        }
         self.active().sites[cell.index()] = order.site(rarity);
         self.message(format!("ゴブリンが{}を配置しました。", order.name()));
         Ok(())
     }
 
     pub fn forecast(&self) -> (usize, u8) {
-        let mut count = 1;
-        let mut best = 0;
-        for floor in &self.floors {
-            count += 2 * floor.chest_count();
-            for site in floor.sites.iter().flatten() {
-                if let Site::Chest { rarity } = site {
-                    best = best.max(*rarity);
-                }
-            }
-        }
+        let mut rarities = self.floor().sites.iter().filter_map(|site| match site {
+            Some(Site::Chest { rarity }) => Some(*rarity),
+            _ => None,
+        });
+        let Some(first) = rarities.next() else {
+            return (0, 0);
+        };
+        let (count, best) = rarities.fold((1, first), |(count, best), rarity| {
+            (count + 1, best.max(rarity))
+        });
         (
-            count.min(RAID_MAX),
+            (1 + 2 * count).min(RAID_MAX),
             (1 + best * 2 + (self.wave / 4).min(6) as u8).min(15),
         )
     }
@@ -743,6 +746,9 @@ impl Game {
             return;
         }
         let (count, best) = self.forecast();
+        if count == 0 {
+            return;
+        }
         let rank = (self.wave / 4).min(6) as u8;
         self.wave += 1;
         self.paused = false;
@@ -820,10 +826,7 @@ impl Game {
         }
     }
 
-    fn spawn(&self, raid: &mut Raid) {
-        let Some((level, class)) = raid.waiting.pop_front() else {
-            return;
-        };
+    fn chest_target(&self, index: usize) -> Option<Cell> {
         let floor = self.floor();
         let mut chests: Vec<_> = floor
             .sites
@@ -844,9 +847,17 @@ impl Game {
             })
             .collect();
         chests.sort_by_key(|&(rarity, cell)| (std::cmp::Reverse(rarity), cell));
-        let chest = chests
-            .get((raid.spawn / 3) as usize % chests.len().max(1))
-            .map(|&(_, cell)| cell);
+        chests
+            .get(index % chests.len().max(1))
+            .map(|&(_, cell)| cell)
+    }
+
+    fn spawn(&self, raid: &mut Raid) {
+        let Some((level, class)) = raid.waiting.pop_front() else {
+            return;
+        };
+        let chest = self.chest_target((raid.spawn / 3) as usize);
+        let floor = self.floor();
         let route = floor
             .route(ENTRY, chest.unwrap_or(THRONE))
             .expect("reachable destination");
@@ -946,8 +957,23 @@ impl Game {
             return false;
         }
         if invader.chest == Some(cell) && !invader.looted {
-            invader.looted = true;
-            invader.route = self.floor().route(cell, THRONE).expect("reachable throne");
+            if matches!(self.floor().site(cell), Some(Site::Chest { .. })) {
+                self.active().sites[cell.index()] = None;
+                invader.looted = true;
+                self.message(format!(
+                    "Lv.{} {}が宝箱を開け、持ち去りました。",
+                    invader.level, adventurer.name
+                ));
+            }
+            invader.chest = if invader.looted {
+                None
+            } else {
+                self.chest_target(0)
+            };
+            invader.route = self
+                .floor()
+                .route(cell, invader.chest.unwrap_or(THRONE))
+                .expect("reachable destination");
             invader.step = 0;
             return true;
         }
@@ -977,6 +1003,9 @@ impl Game {
         }
         let dt = dt.clamp(0.0, 0.25);
         let Some(mut raid) = self.raid.take() else {
+            if self.floor().chest_count() == 0 {
+                return;
+            }
             self.countdown = (self.countdown - dt).max(0.0);
             if self.countdown == 0.0 {
                 self.begin_raid();

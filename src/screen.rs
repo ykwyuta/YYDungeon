@@ -392,6 +392,10 @@ impl Screen {
 
     fn start_raid(&mut self) {
         if !self.game.running() && !self.game.defeated {
+            if self.game.floor().chest_count() == 0 {
+                self.notify("運営中のフロアに宝箱を置くと、冒険者が来ます。");
+                return;
+            }
             self.switch_floor(self.game.floors.len() - 1);
             self.game.begin_raid();
         }
@@ -728,6 +732,8 @@ impl View<'_> {
         let (count, level) = self.game.forecast();
         let raid_label = if self.game.running() {
             format!("第{}波　　襲撃中", self.game.wave)
+        } else if count == 0 {
+            "宝箱を置くと襲撃開始".into()
         } else {
             format!(
                 "第{}波まで {:02}秒　　{}人 / 最大Lv.{}",
@@ -743,7 +749,7 @@ impl View<'_> {
             Font::Normal,
             if self.game.running() { RED } else { GOLD },
         );
-        if !self.game.running() {
+        if !self.game.running() && count > 0 {
             Rect::new(448.0, 154.0, 273.0, 16.0).label(
                 g,
                 &format!("出現候補　{}", ADVENTURERS[strongest_class(level)].name),
@@ -1183,11 +1189,13 @@ impl View<'_> {
                 } else {
                     "襲撃を一時停止　[Space]"
                 }
+            } else if self.game.floor().chest_count() == 0 {
+                "宝箱の設置を待機中"
             } else {
                 "冒険者を呼び込む　[Enter]"
             },
             !self.game.running(),
-            true,
+            self.game.running() || self.game.floor().chest_count() > 0,
         );
     }
 
@@ -1324,7 +1332,7 @@ impl View<'_> {
             Rect::new(304.0, 167.0, 632.0, 51.0).label(g, "迷宮工房の遊び方", Font::TitleMid, TEXT);
             for (i, (title, detail)) in [
                 ("建設", "右の指示を選び、迷路の区画を押すとゴブリンが作業します。分岐や回り道を掘ると、図鑑から新しい魔物を配置できます。"),
-                ("おびき寄せる", "宝箱が多いほど冒険者が増えます。レアな品を入れると、強敵と引き換えに撃退報酬が増えます。"),
+                ("おびき寄せる", "宝箱を置くと冒険者が来ます。箱が多いほど人数が増え、レアな品には強敵が来ます。開けられた箱は消えます。"),
                 ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨と資材を回収します。HPは魔物が青緑、冒険者が赤です。玉座の主が倒されると陥落します。"),
                 ("拡張と委任", "撃退で迷路・建設予算・配置枠が増えます。新しい階へ移ると、前の階を中ボスに任せられます。一定レベル以上の敵は新しい階まで来ます。"),
             ].into_iter().enumerate() {
