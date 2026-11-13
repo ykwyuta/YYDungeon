@@ -38,7 +38,7 @@ fn chest_count_and_rarity_change_the_forecast_and_reward() {
     game.place(Order::Chest, Cell { x: 1, y: 2 }, 1).unwrap();
     assert_eq!(game.forecast(), (5, 3));
     let gold = game.gold;
-    game.reward(3, 0);
+    game.reward(3, 0, 0);
     assert_eq!(game.gold - gold, 27);
 }
 
@@ -46,7 +46,7 @@ fn chest_count_and_rarity_change_the_forecast_and_reward() {
 fn maze_expansion_and_delegation_keep_a_route_to_the_throne() {
     let mut game = Game::new();
     for _ in 0..20 {
-        game.reward(1, 0);
+        game.reward(1, 0, 0);
     }
     game.finish_raid();
     assert_eq!(game.floor().size(), (17, 13));
@@ -67,7 +67,7 @@ fn maze_expansion_and_delegation_keep_a_route_to_the_throne() {
 fn a_steward_stops_weak_invaders_upstairs() {
     let mut game = Game::new();
     for _ in 0..20 {
-        game.reward(1, 0);
+        game.reward(1, 0, 0);
     }
     game.finish_raid();
     game.descend(false).unwrap();
@@ -185,4 +185,54 @@ fn all_monsters_are_earnable_on_a_developed_floor() {
     assert!(MONSTERS
         .iter()
         .all(|monster| game.development >= monster.unlock));
+}
+
+#[test]
+fn legendary_treasure_attracts_a_hero_and_the_raid_resumes_from_save() {
+    let mut game = Game::new();
+    game.begin_raid();
+    let original = game.raid.as_ref().unwrap();
+    assert_eq!(original.invaders[0].class, 0);
+    assert_eq!(
+        original.waiting.iter().copied().collect::<Vec<_>>(),
+        [(1, 1), (1, 2)]
+    );
+    assert!(Game::load(&game.save()).is_some());
+
+    let mut game = Game::new();
+    game.active().expand();
+    game.active().expand();
+    game.loot = 3;
+    game.place(Order::Chest, Cell { x: 10, y: 7 }, 3).unwrap();
+    game.begin_raid();
+    for _ in 0..16 {
+        game.tick(0.25);
+    }
+    let hero = game
+        .invaders()
+        .iter()
+        .find(|invader| invader.class == 11)
+        .unwrap();
+    assert_eq!(ADVENTURERS[hero.class as usize].name, "勇者");
+    assert_eq!(hero.level, 7);
+    assert_eq!(hero.max_hp, 109);
+    assert_eq!(Game::load(&game.save()).unwrap().save(), game.save());
+    let before = game.gold;
+    game.reward(7, 0, 11);
+    assert_eq!(game.gold - before, 65);
+}
+
+#[test]
+fn smaller_raids_rotate_through_each_rank_including_its_leader() {
+    use crate::adventurers::strongest_class;
+    for (level, expected) in [(1, 0..3), (3, 3..6), (5, 6..9), (7, 9..12)] {
+        let mut encountered = [false; ADVENTURERS.len()];
+        for wave in 1..=4 {
+            for index in 0..3 {
+                encountered[raid_class(level, wave, index, index == 2) as usize] = true;
+            }
+        }
+        assert!(expected.clone().all(|class| encountered[class]));
+        assert_eq!(strongest_class(level), expected.end - 1);
+    }
 }

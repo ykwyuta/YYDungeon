@@ -1,7 +1,7 @@
 # 画像素材
 
 - YYMythology の `assets/mythology/wild-djinn.png` から氷の主と砂の魔神を切り出しました。
-- YYMythology の `assets/units/` から作業員と冒険者3種を流用しました。作業員はゴブリン守備兵に合わせて着色しています。
+- YYMythology の `assets/units/` から作業員を流用しました。作業員はゴブリン守備兵に合わせて着色しています。
 - YYCrusaders の `assets/map/fort.png` を題字脇に使っています。
 - ゴブリン親方・宝箱・針の罠・氷結の罠は組み込み ImageGen で新規生成しました。透過 PNG をトリミング・縮小し、罠のシートを2つに分けています。
 
@@ -48,3 +48,15 @@ A game sprite atlas, 5 columns and 2 rows, landscape 5:2 ratio; each of the ten 
 ### スプライトシート 4
 
 A game sprite atlas, 5 columns and 2 rows, landscape 5:2 ratio; each of the ten equal square cells (precise separated regular grid) contains ONE unique small sprite centered with ample empty transparent margins on all sides, silhouettes never cross cell boundaries. Read left to right, top then bottom: chimera, hydra, phoenix, lich, ruby red dragon, azure frost dragon, gold thunder dragon, dark void dragon, then leave the last two cells empty. Illustrated Japanese dark fantasy strategy dungeon creatures, sophisticated hand-painted shaded forms, 3/4 top-down sprites, visible full bodies, varied strong silhouettes readable at 32px. Actual alpha transparency, no backgrounds or drop shadows, no labels, no text, no visible lines, no frames. The creatures occupy 60% of their assigned cell so sprites can be cropped programmatically. Strictly honor the roster order.
+
+## 冒険者の専用スプライト12種
+
+組み込み ImageGen で生成した透過スプライトシートを切り出し、`assets/adventurers/` に保存しています。
+
+### スプライトシート 1
+
+Game asset production: precisely aligned 3 columns x 2 rows sprite atlas on genuine transparent alpha, 3:2 landscape. Exactly six distinct human medieval Japanese RPG adventurers, each FULL BODY and strictly centered within its equally sized grid cell, with generous separation and padding, clear isolated silhouette readable at 25px. Order left to right top then bottom: street thug with wooden club and patched brown tunic; hooded thief with short dagger and teal scarf; village hunter with longbow and olive cloak; young novice adventurer with copper breastplate and short sword; mercenary with rugged red scarf and long two-handed axe; pilgrim cleric in white and warm gold with sun-topped staff. Painterly colorful detailed medieval fantasy strategy game style, compact heroic proportions, three-quarter overhead angle from front. No floors, plinths, drop shadows, boxes, borders, writing, extra props or characters. Keep effects inside their respective cell.
+
+### スプライトシート 2
+
+Game asset production: precisely aligned 3 columns x 2 rows sprite atlas on genuine transparent alpha, 3:2 landscape. Exactly six distinct human medieval Japanese RPG adventurers, each FULL BODY and strictly centered within its equally sized grid cell, with generous separation and padding, clear isolated silhouette readable at 25px. Order left to right top then bottom: veteran knight in shining steel armor with tall blue shield; mage in purple cloak with ice-blue glowing crystal staff; ranger in deep forest green coat with recurved longbow; paladin with white-gold plate and luminous shield; swordmaster in black and crimson carrying twin curved swords; legendary hero with white cape, royal blue and gold armor, one lifted radiant sword. Painterly colorful detailed medieval fantasy strategy game style, compact heroic proportions, three-quarter overhead angle from front. No floors, plinths, drop shadows, boxes, borders, writing, extra props or characters. Keep effects inside their respective cell.

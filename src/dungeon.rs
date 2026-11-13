@@ -1,3 +1,4 @@
+use crate::adventurers::{raid_class, ADVENTURERS};
 use crate::monsters::{Monster, Tactic, GOBLIN, MONSTERS, SENTINEL};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -684,17 +685,19 @@ impl Game {
         Ok(())
     }
 
-    fn reward(&mut self, level: u8, depth: usize) {
+    fn reward(&mut self, level: u8, depth: usize, class: u8) {
         self.kills += 1;
-        let gold = 9 + 6 * level as u32;
+        let adventurer = &ADVENTURERS[class as usize];
+        let gold = 9 + 6 * level as u32 + adventurer.bounty;
         self.gold += gold;
         self.bones += 1 + (level >= 5) as u32;
         self.loot += 1 + (level >= 4) as u32;
         self.floors[depth].earned += 1;
         self.message(format!(
-            "B{}でLv.{}撃退。金貨 +{}・骨材と戦利品を回収。",
+            "B{}でLv.{} {}を撃退。金貨 +{}・骨材と戦利品を回収。",
             depth + 1,
             level,
+            adventurer.name,
             gold
         ));
     }
@@ -744,6 +747,7 @@ impl Game {
             } else {
                 best.saturating_sub((index % 3) as u8).max(1 + rank)
             };
+            let class = raid_class(level, self.wave, index, index + 1 == count);
             let mut captured = false;
             for (depth, budget) in budgets.iter_mut().enumerate().take(self.floors.len() - 1) {
                 let floor = &self.floors[depth];
@@ -754,17 +758,17 @@ impl Game {
                     bypassed += 1;
                     continue;
                 }
-                let cost = 7 + 4 * level as u32;
+                let cost = 7 + 4 * level as u32 + ADVENTURERS[class as usize].bounty;
                 if *budget >= cost {
                     *budget -= cost;
-                    self.reward(level, depth);
+                    self.reward(level, depth, class);
                     stopped += 1;
                     captured = true;
                     break;
                 }
             }
             if !captured {
-                waiting.push_back((level, ((index + self.wave as usize - 1) % 3) as u8));
+                waiting.push_back((level, class));
             }
         }
         self.message(format!("第{}波。冒険者{}人が侵入。", self.wave, count));
@@ -828,7 +832,7 @@ impl Game {
         let route = floor
             .route(ENTRY, chest.unwrap_or(THRONE))
             .expect("reachable destination");
-        let hp = 22 + 9 * level as i32 + 4 * class as i32;
+        let hp = 22 + 9 * level as i32 + ADVENTURERS[class as usize].health;
         raid.invaders.push(Invader {
             level,
             hp,
@@ -862,25 +866,26 @@ impl Game {
             invader.cell = invader.route[invader.step];
         }
         let cell = invader.cell;
+        let adventurer = &ADVENTURERS[invader.class as usize];
         if !invader.fought.contains(&cell) {
             match &mut self.active().sites[cell.index()] {
-                Some(Site::Spikes) => invader.hp -= 12,
+                Some(Site::Spikes) => invader.hp -= 12 - adventurer.trap_armor,
                 Some(Site::Frost) => {
-                    invader.hp -= 8;
-                    invader.freeze = 2;
+                    invader.hp -= 8 - adventurer.trap_armor;
+                    invader.freeze = 2 - adventurer.resist;
                 }
                 Some(site) => {
                     if let Some((hp, monster)) = site.monster_hp_mut() {
                         if *hp > 0 {
-                            let retaliation = 6 + 3 * invader.level as u16;
+                            let retaliation = 6 + 3 * invader.level as u16 + adventurer.retaliation;
                             let bonus = match monster.tactic {
                                 Tactic::Ambush if invader.hp == invader.max_hp => 10,
                                 Tactic::Venom => {
-                                    invader.poison = invader.poison.max(3);
+                                    invader.poison = invader.poison.max(3 - adventurer.resist);
                                     0
                                 }
                                 Tactic::Snare => {
-                                    invader.freeze = 2;
+                                    invader.freeze = 2 - adventurer.resist;
                                     0
                                 }
                                 _ => 0,
@@ -909,15 +914,18 @@ impl Game {
             return true;
         }
         if cell == THRONE && (invader.chest.is_none() || invader.looted) {
-            let damage = 4 + 4 * invader.level as u32 + invader.hp as u32 / 3;
+            let damage = 4
+                + 4 * invader.level as u32
+                + invader.hp as u32 / 3
+                + u32::from(adventurer.retaliation);
             self.boss = self.boss.saturating_sub(damage);
             self.defeated = self.boss == 0;
             if self.defeated {
                 self.message("氷の主が倒れ、迷宮は陥落しました。");
             } else {
                 self.message(format!(
-                    "Lv.{}が玉座に到達。氷の主に{}ダメージ。",
-                    invader.level, damage
+                    "Lv.{} {}が玉座に到達。氷の主に{}ダメージ。",
+                    invader.level, adventurer.name, damage
                 ));
             }
             return false;
@@ -954,7 +962,7 @@ impl Game {
                             raid.fallen.push(invader.cell);
                         }
                     }
-                    self.reward(invader.level, self.floors.len() - 1);
+                    self.reward(invader.level, self.floors.len() - 1, invader.class);
                 } else {
                     break;
                 }
@@ -1054,7 +1062,9 @@ impl Game {
             return false;
         }
         let Some(raid) = &self.raid else { return true };
-        let valid_level = |level: u8, class: u8| (1..=15).contains(&level) && class <= 2;
+        let valid_level = |level: u8, class: u8| {
+            (1..=15).contains(&level) && (class as usize) < ADVENTURERS.len()
+        };
         !self.defeated
             && raid.waiting.len() + raid.invaders.len() <= RAID_MAX
             && (0.0..STEP).contains(&raid.clock)

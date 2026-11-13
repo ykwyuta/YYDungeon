@@ -1,3 +1,4 @@
+use crate::adventurers::{strongest_class, ADVENTURERS, ADVENTURER_ART};
 use crate::dungeon::{Cell, Floor, Game, Order, Site, ENTRY, RARITIES, THRONE};
 use crate::gfx::{Bitmap, Font, Gfx};
 use crate::monsters::{GOBLIN, MONSTERS, MONSTER_ART, SENTINEL};
@@ -137,9 +138,9 @@ const SPRITES: [&[u8]; 12] = [
     include_bytes!("../assets/warden.png"),
     include_bytes!("../assets/sentinel.png"),
     include_bytes!("../assets/goblin.png"),
-    include_bytes!("../assets/adventurer.png"),
-    include_bytes!("../assets/archer.png"),
-    include_bytes!("../assets/knight.png"),
+    ADVENTURER_ART[0],
+    ADVENTURER_ART[1],
+    ADVENTURER_ART[2],
     include_bytes!("../assets/fort.png"),
     include_bytes!("../assets/foreman.png"),
     include_bytes!("../assets/chest.png"),
@@ -162,6 +163,7 @@ impl Art {
         self.bitmaps = SPRITES
             .iter()
             .chain(MONSTER_ART.iter())
+            .chain(ADVENTURER_ART[3..].iter())
             .map(|bytes| {
                 let rgba = image::load_from_memory(bytes).ok()?.into_rgba8();
                 let (w, h) = rgba.dimensions();
@@ -176,6 +178,15 @@ impl Art {
                 Some((gfx.create_bitmap(w, h, &pixels)?, w as f32 / h as f32))
             })
             .collect();
+    }
+
+    fn draw_adventurer(&self, gfx: &Gfx, class: u8, rect: Rect) {
+        let index = if class < 3 {
+            3 + class as usize
+        } else {
+            SPRITES.len() + MONSTER_ART.len() + class as usize - 3
+        };
+        self.draw(gfx, index, rect, 1.0);
     }
 
     fn draw_monster(&self, gfx: &Gfx, id: u8, rect: Rect, alpha: f32) {
@@ -718,6 +729,14 @@ impl View<'_> {
             Font::Normal,
             if self.game.running() { RED } else { GOLD },
         );
+        if !self.game.running() {
+            Rect::new(448.0, 154.0, 273.0, 16.0).label(
+                g,
+                &format!("出現候補　{}", ADVENTURERS[strongest_class(level)].name),
+                Font::Small,
+                DIM,
+            );
+        }
         PAUSE.button(
             g,
             if self.game.paused {
@@ -855,7 +874,7 @@ impl View<'_> {
             for (index, invader) in self.game.invaders().iter().enumerate() {
                 let mut rect = grid.cell(invader.cell).inset(2.0);
                 rect.x += (index % 3) as f32 * 2.0 - 2.0;
-                self.art.draw(g, 3 + invader.class as usize, rect, 1.0);
+                self.art.draw_adventurer(g, invader.class, rect);
                 Rect::new(rect.x, rect.y, rect.w, 3.0).fill(g, INSET);
                 Rect::new(
                     rect.x,
@@ -878,27 +897,43 @@ impl View<'_> {
             }
         }
         let detail = if let Some(cell) = highlight {
-            let label = match floor.site(cell) {
-                Some(Site::Chest { rarity }) => format!("宝箱・{}", RARITIES[rarity as usize]),
-                Some(site) if site.monster().is_some() => {
-                    let (id, hp) = site.monster().unwrap();
-                    format!("{}　体力 {}", MONSTERS[id as usize].name, hp)
-                }
-                Some(site) => site.order().name().into(),
-                None if cell == ENTRY => "入口".into(),
-                None if cell == THRONE => if self.live() {
-                    "氷の主の玉座"
-                } else {
-                    "中ボスの玉座"
-                }
-                .into(),
-                None if floor.open(cell) => "通路".into(),
-                None if self.order == Order::Dig => floor.dig_development(cell).map_or_else(
-                    || "石壁".into(),
-                    |gain| format!("石壁　掘削で迷宮開発 +{gain}"),
-                ),
+            let invader = self
+                .game
+                .invaders()
+                .iter()
+                .rev()
+                .find(|invader| self.live() && invader.cell == cell);
+            let label = if let Some(invader) = invader {
+                format!(
+                    "Lv.{} {}　HP {}/{}",
+                    invader.level,
+                    ADVENTURERS[invader.class as usize].name,
+                    invader.hp,
+                    invader.max_hp
+                )
+            } else {
+                match floor.site(cell) {
+                    Some(Site::Chest { rarity }) => format!("宝箱・{}", RARITIES[rarity as usize]),
+                    Some(site) if site.monster().is_some() => {
+                        let (id, hp) = site.monster().unwrap();
+                        format!("{}　体力 {}", MONSTERS[id as usize].name, hp)
+                    }
+                    Some(site) => site.order().name().into(),
+                    None if cell == ENTRY => "入口".into(),
+                    None if cell == THRONE => if self.live() {
+                        "氷の主の玉座"
+                    } else {
+                        "中ボスの玉座"
+                    }
+                    .into(),
+                    None if floor.open(cell) => "通路".into(),
+                    None if self.order == Order::Dig => floor.dig_development(cell).map_or_else(
+                        || "石壁".into(),
+                        |gain| format!("石壁　掘削で迷宮開発 +{gain}"),
+                    ),
 
-                None => "石壁".into(),
+                    None => "石壁".into(),
+                }
             };
             format!("{:02} / {:02}　　{}", cell.x + 1, cell.y + 1, label)
         } else {

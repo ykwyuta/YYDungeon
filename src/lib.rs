@@ -1,3 +1,4 @@
+mod adventurers;
 mod dungeon;
 mod monsters;
 
