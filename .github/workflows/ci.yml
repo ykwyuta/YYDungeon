@@ -1,0 +1,31 @@
+name: YYDungeon
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cargo test --locked --lib
+      - run: node tools/build.mjs
+      - run: node tools/wasm-smoke.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yydungeon-web
+          path: dist/
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked --lib
+      - run: cargo build --locked --release --bin yydungeon-win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yydungeon-windows
+          path: target/release/yydungeon-win.exe

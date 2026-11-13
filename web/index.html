@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10151e">
+  <meta name="description" content="ゴブリンに指示を出し、罠と魔物で冒険者を迎え撃つダンジョン運営ゲーム。">
+  <title>迷宮工房 · YYDungeon</title>
+  <link rel="icon" href="favicon.ico">
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; background: #10151e; color: #f4ebdb; }
+    body { display: grid; place-items: center; font: 16px "Yu Gothic UI", system-ui, sans-serif; }
+    canvas { display: block; width: 100%; height: 100dvh; touch-action: none; }
+    #status { position: fixed; margin: 24px; max-width: 480px; line-height: 1.6; }
+    @media (orientation: portrait) and (max-width: 600px) {
+      canvas { min-width: 720px; min-height: 470px; touch-action: pan-x pan-y; }
+      body { display: block; overflow: auto; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" tabindex="0" aria-label="迷宮工房のゲーム画面">Canvas 2D に対応したブラウザで開いてください。</canvas>
+  <p id="status" role="status">迷宮を読み込んでいます…</p>
+  <script defer src="main.js"></script>
+</body>
+</html>
