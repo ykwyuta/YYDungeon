@@ -126,6 +126,15 @@ assert.equal(wasm.yy_can_autosave(), 1);
 assert.deepEqual(game(), played);
 console.log("Wasm renders, accepts construction orders, resolves a raid and resumes the saved game.");
 
+// Select a new trap from the workshop catalogue.
+wasm.yy_event(2, 57, 0);
+wasm.yy_frame(0, 1);
+assert.ok(labels.has("毒霧の罠 Lv.1") && labels.has("爆炎の罠 Lv.1") && labels.has("呪印の罠 Lv.1"));
+wasm.yy_event(1, 540, 390);
+wasm.yy_event(1, 289, 261);
+wasm.yy_frame(0, 1);
+assert.ok(game().floors[0].sites.some(site => site?.Trap?.kind === "Poison"));
+
 // Dig the wall at (3, 3) and recruit through the roster.
 wasm.yy_event(2, 54, 0);
 wasm.yy_event(1, 289, 352);

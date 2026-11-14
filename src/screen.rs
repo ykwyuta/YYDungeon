@@ -4,7 +4,7 @@ use crate::adventurers::{
 use crate::duel::{boss_mp, Command, Duel};
 use crate::duel_animation::{resting_poses, Animation, Pose, TURN_TIME};
 use crate::dungeon::REWARD_PERCENT;
-use crate::dungeon::{Cell, Floor, Game, Order, Site, ENTRY, RARITIES, THRONE};
+use crate::dungeon::{Cell, Floor, Game, Order, Site, Trap, ENTRY, RARITIES, THRONE};
 use crate::gfx::{Bitmap, Font, Gfx};
 use crate::monsters::{GOBLIN, MONSTERS, MONSTER_ART, SENTINEL};
 
@@ -358,6 +358,21 @@ const fn order_row(index: usize) -> Rect {
 const fn rarity_button(index: usize) -> Rect {
     Rect::new(868.0 + index as f32 * 82.0, 574.0, 76.0, 27.0)
 }
+const TRAP_CLOSE: Rect = Rect::new(745.0, 565.0, 188.0, 39.0);
+fn trap_row(index: usize) -> Rect {
+    Rect::new(307.0, 250.0 + index as f32 * 60.0, 626.0, 51.0)
+}
+
+fn trap_mark(kind: Trap) -> (&'static str, Color) {
+    match kind {
+        Trap::Spikes => ("針", RED),
+        Trap::Frost => ("氷", RARE[2]),
+        Trap::Poison => ("毒", rgb(0x91ca69)),
+        Trap::Blast => ("爆", rgb(0xef9a58)),
+        Trap::Hex => ("呪", rgb(0xce91ef)),
+    }
+}
+
 const BESTIARY_CLOSE: Rect = Rect::new(854.0, 652.0, 225.0, 45.0);
 const BESTIARY_BACK: Rect = Rect::new(161.0, 652.0, 107.0, 45.0);
 const BESTIARY_NEXT: Rect = Rect::new(367.0, 652.0, 107.0, 45.0);
@@ -412,6 +427,7 @@ enum Overlay {
     Secretary,
     Butler,
     Bestiary(usize),
+    Traps,
     Descend,
     Defeat,
     Reset,
@@ -507,6 +523,10 @@ impl Screen {
             self.overlay = Some(Overlay::Bestiary(0));
             return;
         }
+        if order == Order::TrapMenu {
+            self.overlay = Some(Overlay::Traps);
+            return;
+        }
         self.order = if self.order == order {
             Order::Inspect
         } else {
@@ -562,6 +582,18 @@ impl Screen {
     fn overlay_click(&mut self, overlay: Overlay, x: f32, y: f32) {
         if matches!(overlay, Overlay::Secretary | Overlay::Butler) {
             if COURT_CLOSE.has(x, y) {
+                self.overlay = None;
+            }
+            return;
+        }
+        if overlay == Overlay::Traps {
+            if TRAP_CLOSE.has(x, y) {
+                self.overlay = None;
+            } else if let Some(index) =
+                (0..Trap::ALL.len()).find(|&index| trap_row(index).has(x, y))
+            {
+                self.order = Trap::ALL[index].order();
+                self.selected = None;
                 self.overlay = None;
             }
             return;
@@ -763,6 +795,7 @@ impl Screen {
                     37 => self.switch_floor(self.floor.saturating_sub(1)),
                     39 => self.switch_floor(self.floor + 1),
                     50 | 51 => self.select_order(Order::Bestiary),
+                    57 if self.live() && !self.game.running() => self.select_order(Order::TrapMenu),
                     49..=56 if self.live() && !self.game.running() => {
                         self.select_order(Order::ALL[((key - 49) as usize).saturating_sub(1)])
                     }
@@ -1096,13 +1129,29 @@ impl View<'_> {
                         );
                         TEAL
                     } else {
-                        let (sprite, ink) = match site {
-                            Site::Chest { rarity } => (8, RARE[rarity as usize]),
-                            Site::Spikes | Site::RankedTrap { frost: false, .. } => (9, RED),
-                            Site::Frost | Site::RankedTrap { frost: true, .. } => (10, RARE[2]),
-                            _ => unreachable!(),
+                        let ink = match site {
+                            Site::Chest { rarity } => {
+                                self.art.draw(g, 8, rect.inset(3.0), 1.0);
+                                RARE[rarity as usize]
+                            }
+                            _ => {
+                                let kind = site.order().trap().expect("trap on the map");
+                                let (mark, ink) = trap_mark(kind);
+                                match kind {
+                                    Trap::Spikes | Trap::Frost => self.art.draw(
+                                        g,
+                                        if kind == Trap::Spikes { 9 } else { 10 },
+                                        rect.inset(3.0),
+                                        1.0,
+                                    ),
+                                    _ => {
+                                        rect.inset(4.0).panel(g, INSET, ink);
+                                        rect.inset(4.0).label(g, mark, Font::NormalCenter, ink);
+                                    }
+                                }
+                                ink
+                            }
                         };
-                        self.art.draw(g, sprite, rect.inset(3.0), 1.0);
                         ink
                     };
                     if site.monster().is_none() {
@@ -1281,7 +1330,12 @@ impl View<'_> {
                 order = self.order;
             }
             let rect = order_row(i);
-            let selected = build && self.order == order;
+            let selected_trap = self
+                .order
+                .trap()
+                .filter(|kind| !matches!(kind, Trap::Spikes | Trap::Frost));
+            let selected = build
+                && (self.order == order || order == Order::TrapMenu && selected_trap.is_some());
             rect.panel(
                 g,
                 if selected { rgb(0x433626) } else { INSET },
@@ -1314,12 +1368,26 @@ impl View<'_> {
                     Rect::new(rect.x + 6.0, rect.y + 2.0, 29.0, 26.0),
                     if build { 1.0 } else { 0.55 },
                 ),
+                7 => {
+                    let (mark, color) = selected_trap.map_or(("罠", GOLD), trap_mark);
+                    Rect::new(rect.x + 7.0, rect.y + 4.0, 26.0, 26.0).label(
+                        g,
+                        mark,
+                        Font::NormalCenter,
+                        color,
+                    );
+                }
                 _ => Rect::new(rect.x + 7.0, rect.y + 4.0, 26.0, 26.0).label(
                     g,
                     "−",
                     Font::NormalCenter,
                     GOLD,
                 ),
+            }
+            if order == Order::TrapMenu {
+                if let Some(kind) = selected_trap {
+                    order = kind.order();
+                }
             }
             let name = self.game.next_trap_level(order).map_or_else(
                 || order.name().into(),
@@ -1333,7 +1401,9 @@ impl View<'_> {
             };
             let cost = if order == Order::Bestiary {
                 format!("開発 {}", self.game.development)
-            } else if matches!(order, Order::Recruit(_)) {
+            } else if order == Order::TrapMenu {
+                "5種類".into()
+            } else if matches!(order, Order::Recruit(_) | Order::Trap(_)) {
                 format!("{}金 {}骨 {}品", price, order.bones(), loot)
             } else if loot > 0 {
                 format!("{} 金 / {} 品", price, loot)
@@ -1794,6 +1864,43 @@ impl View<'_> {
         COURT_CLOSE.button(g, "閉じる　[Esc]", true, true);
     }
 
+    fn traps(&self, g: &mut Gfx) {
+        Rect::new(283.0, 164.0, 674.0, 461.0).panel(g, PANEL, GOLD);
+        Rect::new(307.0, 189.0, 626.0, 43.0).label(g, "罠の一覧", Font::TitleMid, GOLD);
+        for (index, kind) in Trap::ALL.into_iter().enumerate() {
+            let rect = trap_row(index);
+            let order = kind.order();
+            let level = self.game.next_trap_level(order).unwrap_or(1);
+            let (mark, color) = trap_mark(kind);
+            rect.panel(g, INSET, color);
+            Rect::new(rect.x + 8.0, rect.y + 5.0, 44.0, 41.0).label(g, mark, Font::Big, color);
+            Rect::new(rect.x + 55.0, rect.y + 3.0, 340.0, 22.0).label(
+                g,
+                &format!("{} Lv.{level}", order.name()),
+                Font::Normal,
+                TEXT,
+            );
+            Rect::new(rect.x + 55.0, rect.y + 27.0, 365.0, 20.0).label(
+                g,
+                &kind.stats(level),
+                Font::Normal,
+                color,
+            );
+            Rect::new(rect.x + 409.0, rect.y + 5.0, 207.0, 41.0).label(
+                g,
+                &format!(
+                    "{}金　{}骨　{}品",
+                    self.game.construction_price(order),
+                    order.bones(),
+                    order.loot()
+                ),
+                Font::NormalCenter,
+                GOLD,
+            );
+        }
+        TRAP_CLOSE.button(g, "閉じる　Esc", false, true);
+    }
+
     fn overlay(&self, g: &mut Gfx, overlay: Overlay) {
         Rect::new(0.0, 0.0, W, H).fill(g, [0.025, 0.04, 0.065, 0.86]);
         if matches!(overlay, Overlay::Secretary | Overlay::Butler) {
@@ -1804,11 +1911,15 @@ impl View<'_> {
             self.bestiary(g, page);
             return;
         }
+        if overlay == Overlay::Traps {
+            self.traps(g);
+            return;
+        }
         if overlay == Overlay::Help {
             Rect::new(283.0, 144.0, 674.0, 492.0).panel(g, PANEL, GOLD);
             Rect::new(304.0, 167.0, 632.0, 51.0).label(g, "迷宮工房の遊び方", Font::TitleMid, TEXT);
             for (i, (title, detail)) in [
-                ("建設", "右の指示で建設します。岩壁や設置物の撤去は金貨8です。罠は設置するほど強くなり、次の費用も上がります。"),
+                ("建設", "右の指示で建設します。岩壁や設置物の撤去は金貨8です。「罠の一覧」（9）から5種を選べます。種類ごとに設置するほど威力と費用が上がります。"),
                 ("おびき寄せる", "宝箱が多いほど冒険者が増えます。強さは襲撃のたびに上がり、地下3階以降は深いほど強敵が来ます。レアな品は報酬を増やします。開けられた箱は消えます。"),
                 ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨と資材を回収します。HPは魔物が青緑、冒険者が赤です。玉座ではターン制で戦い、魔王が倒れると陥落します。"),
                 ("拡張と委任", "撃退で迷路と配置枠が広がります。玉座で勝って魔王を育てると次の階へ進めます。前の階は中ボスに任せられます。"),
@@ -1830,7 +1941,7 @@ impl View<'_> {
             Overlay::Descend => ("新しいフロア", format!("魔王が必要なレベルに達しました。地下{}階を掘ります。前の階を任せると氷の主が迎撃し、Lv.{}以上の冒険者は次の階へ通します。", self.game.floors.len() + 1, self.floor().pass_level())),
             Overlay::Reset => ("最初から始める", "現在の迷宮と進行記録を消去して、地下1階から始めます。".into()),
             Overlay::Defeat => ("迷宮陥落", format!("魔王が倒されました。第{}波・累計撃退{}人・地下{}階", self.game.wave, self.game.kills, self.game.floors.len())),
-            Overlay::Help | Overlay::Bestiary(_) | Overlay::Secretary | Overlay::Butler => unreachable!(),
+            Overlay::Help | Overlay::Traps | Overlay::Bestiary(_) | Overlay::Secretary | Overlay::Butler => unreachable!(),
         };
         Rect::new(306.0, 286.0, 628.0, 52.0).label(
             g,

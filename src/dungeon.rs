@@ -74,6 +74,81 @@ impl Cell {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Trap {
+    Spikes,
+    Frost,
+    Poison,
+    Blast,
+    Hex,
+}
+
+impl Trap {
+    pub const ALL: [Self; 5] = [
+        Self::Spikes,
+        Self::Frost,
+        Self::Poison,
+        Self::Blast,
+        Self::Hex,
+    ];
+
+    pub fn order(self) -> Order {
+        match self {
+            Self::Spikes => Order::Spikes,
+            Self::Frost => Order::Frost,
+            _ => Order::Trap(self),
+        }
+    }
+
+    fn price_step(self) -> u32 {
+        [7, 10, 8, 12, 9][self as usize]
+    }
+
+    fn power(self, level: u32) -> i32 {
+        let (base, per_level) = match self {
+            Self::Spikes => (SPIKE_DAMAGE, 3),
+            Self::Frost => (FROST_DAMAGE, 2),
+            Self::Poison => (3, 2),
+            Self::Blast => (18, 4),
+            Self::Hex => (35, 5),
+        };
+        base + (level as i32 - 1) * per_level
+    }
+
+    fn freeze_ticks(level: u32) -> u8 {
+        2 + ((level - 1) / 4).min(4) as u8
+    }
+
+    pub fn stats(self, level: u32) -> String {
+        let power = self.power(level);
+        match self {
+            Self::Spikes => format!("威力{power}"),
+            Self::Frost => format!("威力{power}・足止め{}", Self::freeze_ticks(level)),
+            Self::Poison => format!("毒 {power}×最大5回"),
+            Self::Blast => format!("威力{power}・装甲無視"),
+            Self::Hex => format!("次の対魔物戦で被ダメージ +{power}%"),
+        }
+    }
+
+    fn trigger(self, level: u32, invader: &mut Invader) {
+        let adventurer = &ADVENTURERS[invader.class as usize];
+        let power = self.power(level);
+        match self {
+            Self::Spikes => invader.hp -= power - adventurer.trap_armor,
+            Self::Frost => {
+                invader.freeze = Self::freeze_ticks(level).saturating_sub(adventurer.resist);
+                invader.hp -= power - adventurer.trap_armor;
+            }
+            Self::Poison => {
+                invader.trap_poison_ticks = 5 - adventurer.resist;
+                invader.trap_poison_damage = invader.trap_poison_damage.max(power);
+            }
+            Self::Blast => invader.hp -= power,
+            Self::Hex => invader.hex = invader.hex.max(power),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Site {
     Chest { rarity: u8 },
     Goblin { hp: u16 },
@@ -82,6 +157,7 @@ pub enum Site {
     Spikes,
     Frost,
     RankedTrap { frost: bool, level: u32 },
+    Trap { kind: Trap, level: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +166,8 @@ pub enum Order {
     Chest,
     Bestiary,
     Recruit(u8),
+    TrapMenu,
+    Trap(Trap),
     Spikes,
     Frost,
     Dig,
@@ -98,7 +176,7 @@ pub enum Order {
 }
 
 impl Order {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Chest,
         Self::Bestiary,
         Self::Spikes,
@@ -106,7 +184,17 @@ impl Order {
         Self::Dig,
         Self::Remove,
         Self::Wall,
+        Self::TrapMenu,
     ];
+
+    pub fn trap(self) -> Option<Trap> {
+        match self {
+            Self::Spikes => Some(Trap::Spikes),
+            Self::Frost => Some(Trap::Frost),
+            Self::Trap(kind) => Some(kind),
+            _ => None,
+        }
+    }
 
     pub fn name(self) -> &'static str {
         match self {
@@ -114,8 +202,12 @@ impl Order {
             Self::Chest => "宝箱",
             Self::Bestiary => "仲間モンスター図鑑",
             Self::Recruit(id) => MONSTERS[id as usize].name,
-            Self::Spikes => "針の罠",
-            Self::Frost => "氷結の罠",
+            Self::Spikes | Self::Trap(Trap::Spikes) => "針の罠",
+            Self::Frost | Self::Trap(Trap::Frost) => "氷結の罠",
+            Self::Trap(Trap::Poison) => "毒霧の罠",
+            Self::Trap(Trap::Blast) => "爆炎の罠",
+            Self::Trap(Trap::Hex) => "呪印の罠",
+            Self::TrapMenu => "罠の一覧",
             Self::Dig => "掘削",
             Self::Remove => "撤去",
             Self::Wall => "岩壁を置く",
@@ -127,10 +219,13 @@ impl Order {
             Self::Inspect => 0,
             Self::Remove => 8,
             Self::Chest => 20,
-            Self::Bestiary => 0,
+            Self::Bestiary | Self::TrapMenu => 0,
             Self::Recruit(id) => MONSTERS[id as usize].gold,
-            Self::Spikes => 19,
-            Self::Frost => 38,
+            Self::Spikes | Self::Trap(Trap::Spikes) => 19,
+            Self::Frost | Self::Trap(Trap::Frost) => 38,
+            Self::Trap(Trap::Poison) => 32,
+            Self::Trap(Trap::Blast) => 55,
+            Self::Trap(Trap::Hex) => 44,
             Self::Dig => 14,
             Self::Wall => 10,
         }
@@ -139,7 +234,7 @@ impl Order {
     pub fn bones(self) -> u32 {
         match self {
             Self::Recruit(id) => MONSTERS[id as usize].bones,
-            Self::Frost => 1,
+            Self::Frost | Self::Trap(Trap::Frost | Trap::Blast | Trap::Hex) => 1,
             _ => 0,
         }
     }
@@ -147,6 +242,7 @@ impl Order {
     pub fn loot(self) -> u32 {
         match self {
             Self::Recruit(id) => MONSTERS[id as usize].loot,
+            Self::Trap(Trap::Blast) => 1,
             _ => 0,
         }
     }
@@ -157,8 +253,20 @@ impl Order {
             Self::Chest => "冒険者が開けると宝箱は消えます。宝箱がある間は襲撃が来ます。",
             Self::Bestiary => "迷路を掘って、新しい魔物を仲間にできます。",
             Self::Recruit(_) => "空いている通路を選ぶと、仲間を配置します。",
-            Self::Spikes => "ダメージを与えます。設置するたび次の針の罠が強くなります。",
-            Self::Frost => "ダメージを与えて足止めします。設置するたび次の氷結の罠が強くなります。",
+            Self::Spikes | Self::Trap(Trap::Spikes) => {
+                "ダメージを与えます。設置するたび次の針の罠が強くなります。"
+            }
+            Self::Frost | Self::Trap(Trap::Frost) => {
+                "ダメージを与えて足止めします。設置するたび次の氷結の罠が強くなります。"
+            }
+            Self::TrapMenu => "罠を選ぶと、次に設置する罠の効果と費用を確認できます。",
+            Self::Trap(Trap::Poison) => {
+                "毒霧を踏んだ冒険者は、移動中や戦闘中に毒ダメージを受けます。"
+            }
+            Self::Trap(Trap::Blast) => "装甲を無視する爆発ダメージを与えます。",
+            Self::Trap(Trap::Hex) => {
+                "呪印を踏んだ相手は、次に戦う仲間モンスターから受けるダメージが増えます。"
+            }
             Self::Dig => "通路に接した内壁を掘り、迷路に新しい道を作ります。",
             Self::Remove => "選んだ設置物や岩壁を金貨8で撤去します。",
             Self::Wall => "空き床を岩でふさぎます。置いた岩は撤去で取り除けます。",
@@ -172,11 +280,10 @@ impl Order {
                 id,
                 hp: MONSTERS.get(id as usize)?.hp,
             },
-            Self::Spikes | Self::Frost => Site::RankedTrap {
-                frost: self == Self::Frost,
+            order => Site::Trap {
+                kind: order.trap()?,
                 level: trap_level,
             },
-            _ => return None,
         })
     }
 }
@@ -190,6 +297,7 @@ impl Site {
             Self::Monster { id, .. } => Order::Recruit(id),
             Self::Spikes | Self::RankedTrap { frost: false, .. } => Order::Spikes,
             Self::Frost | Self::RankedTrap { frost: true, .. } => Order::Frost,
+            Self::Trap { kind, .. } => kind.order(),
         }
     }
 
@@ -222,7 +330,7 @@ impl Site {
     pub fn trap_level(self) -> Option<u32> {
         match self {
             Self::Spikes | Self::Frost => Some(1),
-            Self::RankedTrap { level, .. } => Some(level),
+            Self::RankedTrap { level, .. } | Self::Trap { level, .. } => Some(level),
             _ => None,
         }
     }
@@ -525,6 +633,12 @@ pub struct Invader {
     freeze: u8,
     #[serde(default)]
     poison: u8,
+    #[serde(default)]
+    trap_poison_ticks: u8,
+    #[serde(default)]
+    trap_poison_damage: i32,
+    #[serde(default)]
+    hex: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     encounter: Option<Encounter>,
     chest: Option<Cell>,
@@ -585,7 +699,7 @@ pub struct Game {
     #[serde(default = "missing_progress")]
     boss_xp: u32,
     #[serde(default)]
-    traps_built: [u32; 2],
+    traps_built: Vec<u32>,
     pub countdown: f32,
     pub paused: bool,
     pub log: Vec<String>,
@@ -616,7 +730,7 @@ impl Game {
             wave: 0,
             boss: 110,
             boss_xp: 0,
-            traps_built: [0; 2],
+            traps_built: vec![0; Trap::ALL.len()],
             countdown: PREPARE,
             paused: false,
             log: vec!["秘書レイラ：宝箱までの予想経路を確認し、分岐の手前を守りましょう。".into()],
@@ -763,20 +877,15 @@ impl Game {
     }
 
     pub fn next_trap_level(&self, order: Order) -> Option<u32> {
-        let index = match order {
-            Order::Spikes => 0,
-            Order::Frost => 1,
-            _ => return None,
-        };
-        Some((self.traps_built[index] + 1).min(MAX_TRAP_LEVEL))
+        let kind = order.trap()?;
+        Some((self.traps_built[kind as usize] + 1).min(MAX_TRAP_LEVEL))
     }
 
     pub fn construction_price(&self, order: Order) -> u32 {
-        let step = if order == Order::Spikes { 7 } else { 10 };
         order.price()
-            + self
-                .next_trap_level(order)
-                .map_or(0, |level| (level - 1) * step)
+            + order.trap().map_or(0, |kind| {
+                (self.next_trap_level(order).unwrap_or(1) - 1) * kind.price_step()
+            })
     }
 
     pub fn place(&mut self, order: Order, cell: Cell, rarity: u8) -> Result<(), &'static str> {
@@ -940,8 +1049,8 @@ impl Game {
             }
         }
         self.active().sites[cell.index()] = order.site(rarity, trap_level.unwrap_or(1));
-        if let Some(level) = trap_level {
-            self.traps_built[usize::from(order == Order::Frost)] = level;
+        if let (Some(kind), Some(level)) = (order.trap(), trap_level) {
+            self.traps_built[kind as usize] = level;
             self.message(format!(
                 "ゴブリンが{} Lv.{level}を配置しました。",
                 order.name()
@@ -1262,6 +1371,9 @@ impl Game {
             step: 0,
             freeze: 0,
             poison: 0,
+            trap_poison_ticks: 0,
+            trap_poison_damage: 0,
+            hex: 0,
             encounter: None,
             chest,
             looted: false,
@@ -1274,6 +1386,7 @@ impl Game {
             .as_mut()?
             .monster_hp_mut()?;
         if *hp == 0 {
+            invader.hex = 0;
             return None;
         }
         if encounter.delay > 1 {
@@ -1302,11 +1415,15 @@ impl Game {
             damage = (damage * 7 + 3) / 4;
             retaliation = (retaliation * 2).div_ceil(3);
         }
-        invader.hp -= damage;
+        invader.hp -= damage + damage * invader.hex / 100;
         *hp = hp.saturating_sub(retaliation);
         encounter.rounds -= 1;
         encounter.delay = COMBAT_INTERVAL;
-        (invader.hp > 0 && *hp > 0 && encounter.rounds > 0).then_some(encounter)
+        let continued = invader.hp > 0 && *hp > 0 && encounter.rounds > 0;
+        if !continued {
+            invader.hex = 0;
+        }
+        continued.then_some(encounter)
     }
 
     fn move_invader(&mut self, invader: &mut Invader) -> bool {
@@ -1317,6 +1434,16 @@ impl Game {
         if invader.poison > 0 {
             invader.poison -= 1;
             invader.hp -= 3;
+            if invader.hp <= 0 {
+                return false;
+            }
+        }
+        if invader.trap_poison_ticks > 0 {
+            invader.trap_poison_ticks -= 1;
+            invader.hp -= invader.trap_poison_damage;
+            if invader.trap_poison_ticks == 0 {
+                invader.trap_poison_damage = 0;
+            }
             if invader.hp <= 0 {
                 return false;
             }
@@ -1338,17 +1465,9 @@ impl Game {
         if !invader.fought.contains(&cell) {
             match self.floor().site(cell) {
                 Some(site) if site.is_trap() => {
-                    let level = site.trap_level().expect("trap level");
-                    let frost = site.order() == Order::Frost;
-                    let bonus = level as i32 - 1;
-                    let damage = if frost {
-                        invader.freeze =
-                            (2 + (bonus / 4).min(4) as u8).saturating_sub(adventurer.resist);
-                        FROST_DAMAGE + bonus * 2
-                    } else {
-                        SPIKE_DAMAGE + bonus * 3
-                    };
-                    invader.hp -= damage - adventurer.trap_armor;
+                    if let (Some(kind), Some(level)) = (site.order().trap(), site.trap_level()) {
+                        kind.trigger(level, invader);
+                    }
                 }
                 Some(site) if site.monster().is_some_and(|(_, hp)| hp > 0) => {
                     invader.encounter = Some(Encounter {
@@ -1476,6 +1595,10 @@ impl Game {
             return None;
         }
         let (version, mut game): (u8, Self) = serde_json::from_slice(bytes).ok()?;
+        if game.traps_built.len() > Trap::ALL.len() {
+            return None;
+        }
+        game.traps_built.resize(Trap::ALL.len(), 0);
         if game.boss_xp == missing_progress() {
             let tier = game.floors.last()?.tier;
             if !(1..=3).contains(&tier) || game.floors.len() > MAX_FLOORS {
@@ -1615,6 +1738,10 @@ impl Game {
                         })
                     && invader.fought.len() <= WIDTH * HEIGHT
                     && invader.poison <= 3
+                    && invader.trap_poison_ticks <= 5
+                    && (0..=Trap::Poison.power(MAX_TRAP_LEVEL))
+                        .contains(&invader.trap_poison_damage)
+                    && (0..=Trap::Hex.power(MAX_TRAP_LEVEL)).contains(&invader.hex)
                     && invader.encounter.as_ref().is_none_or(|fight| {
                         (1..=COMBAT_ROUNDS).contains(&fight.rounds)
                             && (1..=COMBAT_INTERVAL).contains(&fight.delay)

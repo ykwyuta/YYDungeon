@@ -766,9 +766,17 @@ fn the_throne_intercepts_adventurers_on_the_way_to_a_chest() {
 #[test]
 fn each_trap_type_keeps_its_level_and_price_progression_after_removal_and_reload() {
     let mut game = Game::new();
-    game.bones = 2;
+    game.bones = 20;
+    game.gold = 1000;
+    game.loot = 20;
     let cell = Cell { x: 1, y: 1 };
-    for order in [Order::Spikes, Order::Frost] {
+    let mut old_save: serde_json::Value = serde_json::from_slice(&game.save()).unwrap();
+    old_save[1]["traps_built"] = serde_json::json!([2, 4]);
+    let old_game = Game::load(&serde_json::to_vec(&old_save).unwrap()).unwrap();
+    assert_eq!(old_game.next_trap_level(Order::Spikes), Some(3));
+    assert_eq!(old_game.next_trap_level(Order::Frost), Some(5));
+    assert_eq!(old_game.next_trap_level(Trap::Poison.order()), Some(1));
+    for order in Trap::ALL.map(Trap::order) {
         assert_eq!(game.next_trap_level(order), Some(1));
         let initial_price = game.construction_price(order);
         game.place(order, cell, 0).unwrap();
@@ -835,4 +843,44 @@ fn different_defenders_excel_against_different_professions() {
     assert!(goblin_against_hero.0 > goblin_against_mage.0);
     assert!(bat_against_mage.0 > bat_against_hero.0);
     assert!(bat_against_mage.1 < goblin_against_mage.1);
+}
+
+#[test]
+fn new_traps_poison_bypass_armor_and_amplify_the_next_monster_fight() {
+    let mut game = Game::new();
+    game.begin_raid();
+    let mut invader = game.invaders()[0].clone();
+    invader.class = 6; // Knight with trap armor.
+    invader.route = vec![ENTRY, Cell { x: 1, y: 3 }, Cell { x: 2, y: 3 }];
+    let cell = invader.route[1];
+    game.active().sites[cell.index()] = Some(Site::Trap {
+        kind: Trap::Poison,
+        level: 2,
+    });
+    let hp = invader.hp;
+    assert!(game.move_invader(&mut invader));
+    assert_eq!(invader.hp, hp);
+    assert!(game.move_invader(&mut invader));
+    assert_eq!(invader.hp, hp - 5 - (SPIKE_DAMAGE - 2));
+
+    let mut knight = game.invaders()[0].clone();
+    knight.class = 6;
+    let hp = knight.hp;
+    Trap::Blast.trigger(2, &mut knight);
+    assert_eq!(knight.hp, hp - 22);
+
+    let mut target = game.invaders()[0].clone();
+    target.cell = cell;
+    let mut marked = target.clone();
+    Trap::Hex.trigger(3, &mut marked);
+    let strike = Encounter {
+        rounds: 1,
+        delay: 1,
+    };
+    game.active().sites[cell.index()] = Some(Site::Goblin { hp: 38 });
+    game.fight(&mut target, strike.clone());
+    game.active().sites[cell.index()] = Some(Site::Goblin { hp: 38 });
+    game.fight(&mut marked, strike);
+    assert!(marked.hp < target.hp);
+    assert_eq!(marked.hex, 0);
 }
