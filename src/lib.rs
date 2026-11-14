@@ -1,5 +1,11 @@
 mod adventurers;
 mod duel;
+
+#[cfg(any(windows, target_arch = "wasm32"))]
+mod duel_animation;
+
+#[cfg(any(windows, target_arch = "wasm32"))]
+mod duel_art;
 mod dungeon;
 mod monsters;
 

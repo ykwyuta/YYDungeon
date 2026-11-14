@@ -1,5 +1,5 @@
 use crate::adventurers::{raid_class, ADVENTURERS};
-use crate::duel::{Command, Duel, Outcome};
+use crate::duel::{Command, Duel, Outcome, Turn};
 use crate::monsters::{Monster, Tactic, GOBLIN, MONSTERS, SENTINEL};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
@@ -607,11 +607,10 @@ impl Game {
         self.raid.as_ref()?.duel.as_ref()
     }
 
-    pub fn duel_command(&mut self, command: Command) {
+    pub fn duel_command(&mut self, command: Command) -> Option<Turn> {
         let level = self.boss_level();
-        if let Some(duel) = self.raid.as_mut().and_then(|raid| raid.duel.as_mut()) {
-            duel.act(command, level, &mut self.boss, self.wave);
-        }
+        let duel = self.raid.as_mut()?.duel.as_mut()?;
+        duel.act(command, level, &mut self.boss, self.wave)
     }
 
     pub fn dismiss_duel(&mut self) {

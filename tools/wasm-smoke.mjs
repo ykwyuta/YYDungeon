@@ -151,9 +151,11 @@ wasm.yy_init(1240, 780);
 wasm.yy_event(2, 13, 0);
 wasm.yy_frame(0, 1);
 assert.ok(labels.has("玉座の戦い"));
+const idleEnemyId = spritesDrawn.at(-1).id;
+const idleBossId = spritesDrawn.at(-2).id;
 const bossSprite = spritesDrawn.at(-2);
 const adventurerSprite = spritesDrawn.at(-1);
-assert.ok(bossSprite.x < 350 && bossSprite.y >= 225);
+assert.ok(bossSprite.x < 350 && bossSprite.y >= 195);
 assert.ok(adventurerSprite.x > 700 && adventurerSprite.y < bossSprite.y);
 assert.ok(adventurerSprite.height >= 365);
 assert.ok(adventurerSprite.y + adventurerSprite.height < bossSprite.y + bossSprite.height);
@@ -161,8 +163,49 @@ wasm.yy_event(2, 50, 0);
 wasm.yy_frame(0, 1);
 assert.equal(game().raid.duel.outcome, "Victory");
 assert.equal(game().raid.duel.boss_mp, 6);
+assert.notEqual(spritesDrawn.at(-2).id, idleBossId); // Frost spell pose
+assert.equal(spritesDrawn.at(-1).id, idleEnemyId);
+wasm.yy_event(2, 13, 0);
+wasm.yy_frame(0.25, 1);
+assert.ok(game().raid.duel); // Presentation cannot be skipped by another input.
+wasm.yy_frame(0.25, 1);
+assert.notEqual(spritesDrawn.at(-1).id, idleEnemyId); // Impact pose
+for (let i = 0; i < 6; i++) wasm.yy_frame(0.25, 1);
+assert.ok(labels.has("攻防中") && labels.has("次へ　[Enter]"));
 wasm.yy_event(2, 13, 0);
 wasm.yy_frame(0.25, 1);
 wasm.yy_frame(0.25, 1);
 assert.equal(game().last_report.stopped, 1);
 assert.equal(game().last_report.throne, 1);
+
+// Both fighters get distinct charge, special, and recoil poses in the same turn.
+arenaGame.floors.push(structuredClone(arenaGame.floors[0]));
+arenaGame.floors.at(-1).tier = 2;
+arenaGame.raid.duel = {
+  class: 11, level: 7, hp: 100, max_hp: 100, mp: 9, max_mp: 9,
+  boss_mp: 15, turn: 0, lines: [], outcome: null,
+};
+const specialSave = new TextEncoder().encode(JSON.stringify([1, arenaGame]));
+new Uint8Array(wasm.memory.buffer, wasm.yy_load_buffer(specialSave.length), specialSave.length).set(specialSave);
+wasm.yy_init(1240, 780);
+wasm.yy_event(2, 13, 0);
+wasm.yy_frame(0, 1);
+const idlePair = spritesDrawn.slice(-2).map(sprite => sprite.id);
+wasm.yy_event(2, 52, 0);
+wasm.yy_frame(0, 1);
+const chargePair = spritesDrawn.slice(-2).map(sprite => sprite.id);
+assert.notEqual(chargePair[0], idlePair[0]);
+for (let i = 0; i < 2; i++) wasm.yy_frame(0.25, 1);
+const bossImpact = spritesDrawn.slice(-2).map(sprite => sprite.id);
+assert.notEqual(bossImpact[0], chargePair[0]);
+assert.notEqual(bossImpact[1], idlePair[1]);
+assert.notEqual(bossImpact[1], chargePair[1]);
+for (let i = 0; i < 2; i++) wasm.yy_frame(0.25, 1);
+const enemyCharge = spritesDrawn.slice(-2).map(sprite => sprite.id);
+assert.notEqual(enemyCharge[1], bossImpact[1]);
+wasm.yy_frame(0.25, 1);
+const enemyImpact = spritesDrawn.slice(-2).map(sprite => sprite.id);
+assert.notEqual(enemyImpact[0], idlePair[0]);
+assert.notEqual(enemyImpact[0], bossImpact[0]);
+assert.notEqual(enemyImpact[1], enemyCharge[1]);
+assert.ok([...labels].some(label => label.includes("光雷の魔法")));

@@ -1,7 +1,7 @@
 use crate::adventurers::ADVENTURERS;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     Claw,
     Frost,
@@ -58,6 +58,19 @@ pub enum Outcome {
     Defeat,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnemyMove {
+    Attack,
+    Spell,
+    Special,
+}
+
+#[derive(Clone, Copy)]
+pub struct Turn {
+    pub command: Command,
+    pub enemy_move: Option<EnemyMove>,
+}
+
 impl Duel {
     pub fn new(class: u8, level: u8, hp: u32, max_hp: u32, boss_level: u32) -> Self {
         let name = ADVENTURERS[class as usize].name;
@@ -80,10 +93,20 @@ impl Duel {
         self.outcome.is_none() && command.level() <= boss_level && command.mp() <= self.boss_mp
     }
 
-    pub fn act(&mut self, command: Command, boss_level: u32, boss_hp: &mut u32, wave: u32) {
+    pub fn act(
+        &mut self,
+        command: Command,
+        boss_level: u32,
+        boss_hp: &mut u32,
+        wave: u32,
+    ) -> Option<Turn> {
         if !self.available(command, boss_level) {
-            return;
+            return None;
         }
+        let mut turn = Turn {
+            command,
+            enemy_move: None,
+        };
         self.turn += 1;
         self.boss_mp -= command.mp();
         self.lines.clear();
@@ -108,7 +131,7 @@ impl Duel {
         if self.hp == 0 {
             self.outcome = Some(Outcome::Victory);
             self.lines.push(format!("{}を撃退した！", enemy.name));
-            return;
+            return Some(turn);
         }
         let flee_chance = if self.class == 11 {
             14
@@ -127,19 +150,25 @@ impl Duel {
         if self.hp * 3 <= self.max_hp && roll % 100 < flee_chance {
             self.outcome = Some(Outcome::Fled);
             self.lines.push(format!("{}は逃げ出した！", enemy.name));
-            return;
+            return Some(turn);
         }
         let level = u32::from(self.level);
-        let (attack, mut damage) = if self.level >= 7 && self.mp >= 5 && self.turn % 2 == 1 {
-            self.mp -= 5;
-            ("光雷の魔法", 10 + level * 2)
-        } else if self.level >= 3 && self.mp >= 2 && self.turn % 2 == 1 {
-            self.mp -= 2;
-            ("火炎の魔法", 6 + level * 2)
-        } else {
-            let name = if self.level >= 5 { "連撃" } else { "攻撃" };
-            (name, 4 + level + u32::from(enemy.retaliation))
-        };
+        let (enemy_move, attack, mut damage) =
+            if self.level >= 7 && self.mp >= 5 && self.turn % 2 == 1 {
+                self.mp -= 5;
+                (EnemyMove::Special, "光雷の魔法", 10 + level * 2)
+            } else if self.level >= 3 && self.mp >= 2 && self.turn % 2 == 1 {
+                self.mp -= 2;
+                (EnemyMove::Spell, "火炎の魔法", 6 + level * 2)
+            } else {
+                let name = if self.level >= 5 { "連撃" } else { "攻撃" };
+                (
+                    EnemyMove::Attack,
+                    name,
+                    4 + level + u32::from(enemy.retaliation),
+                )
+            };
+        turn.enemy_move = Some(enemy_move);
         if command == Command::Guard {
             damage = damage.div_ceil(2);
         }
@@ -152,6 +181,7 @@ impl Duel {
             self.outcome = Some(Outcome::Defeat);
             self.lines.push("氷の主は倒れた。".into());
         }
+        Some(turn)
     }
 
     pub fn valid(&self, boss_level: u32, boss_hp: u32) -> bool {

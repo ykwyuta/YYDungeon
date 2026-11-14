@@ -1,5 +1,6 @@
 use crate::adventurers::{strongest_class, ADVENTURERS, ADVENTURER_ART, DUEL_ADVENTURER_ART};
 use crate::duel::{boss_mp, Command, Duel};
+use crate::duel_animation::{resting_poses, Animation, Pose, TURN_TIME};
 use crate::dungeon::{Cell, Floor, Game, Order, Site, ENTRY, RARITIES, THRONE};
 use crate::dungeon::{FLOOR_BONE_COST, FLOOR_DEVELOPMENT_GOAL, FLOOR_GOLD_COST};
 use crate::gfx::{Bitmap, Font, Gfx};
@@ -173,9 +174,12 @@ const SPRITES: [&[u8]; 16] = [
     include_bytes!("../assets/throne-boss-back.png"),
 ];
 
+type Sprite = (Bitmap, f32);
+
 struct Art {
     generation: u32,
-    bitmaps: Vec<Option<(Bitmap, f32)>>,
+    bitmaps: Vec<Option<Sprite>>,
+    duel_poses: [Option<Vec<Option<Sprite>>>; crate::duel_art::SHEETS.len()],
 }
 
 impl Art {
@@ -189,20 +193,71 @@ impl Art {
             .chain(MONSTER_ART.iter())
             .chain(ADVENTURER_ART[3..].iter())
             .chain(DUEL_ADVENTURER_ART.iter())
-            .map(|bytes| {
-                let rgba = image::load_from_memory(bytes).ok()?.into_rgba8();
-                let (w, h) = rgba.dimensions();
-                let pixels: Vec<_> = rgba
-                    .pixels()
-                    .map(|p| {
-                        let a = p[3] as u32;
-                        let mul = |c| (c as u32 * a + 127) / 255;
-                        (a << 24) | (mul(p[0]) << 16) | (mul(p[1]) << 8) | mul(p[2])
-                    })
-                    .collect();
-                Some((gfx.create_bitmap(w, h, &pixels)?, w as f32 / h as f32))
+            .map(|bytes| Self::bitmap(gfx, bytes))
+            .collect();
+        self.duel_poses.fill_with(|| None);
+    }
+
+    fn bitmap(gfx: &Gfx, bytes: &[u8]) -> Option<Sprite> {
+        let rgba = image::load_from_memory(bytes).ok()?.into_rgba8();
+        Self::rgba_bitmap(gfx, &rgba)
+    }
+
+    fn rgba_bitmap(gfx: &Gfx, rgba: &image::RgbaImage) -> Option<Sprite> {
+        let (w, h) = rgba.dimensions();
+        let pixels: Vec<_> = rgba
+            .pixels()
+            .map(|p| {
+                let a = p[3] as u32;
+                let mul = |c| (c as u32 * a + 127) / 255;
+                (a << 24) | (mul(p[0]) << 16) | (mul(p[1]) << 8) | mul(p[2])
             })
             .collect();
+        Some((gfx.create_bitmap(w, h, &pixels)?, w as f32 / h as f32))
+    }
+
+    fn load_duel(&mut self, gfx: &Gfx, class: u8) {
+        for index in [0, class as usize + 1] {
+            if self.duel_poses[index].is_none() {
+                self.duel_poses[index] =
+                    Some(Self::duel_sheet(gfx, crate::duel_art::SHEETS[index]));
+            }
+        }
+    }
+
+    fn duel_sheet(gfx: &Gfx, bytes: &[u8]) -> Vec<Option<Sprite>> {
+        let sheet = image::load_from_memory(bytes)
+            .expect("embedded duel sprite sheet")
+            .into_rgba8();
+        let size = sheet.width() / 3;
+        (0..Pose::EXTRA_COUNT)
+            .map(|index| {
+                let x = (index as u32 % 3) * size;
+                let y = (index as u32 / 3) * size;
+                Self::rgba_bitmap(
+                    gfx,
+                    &image::imageops::crop_imm(&sheet, x, y, size, size).to_image(),
+                )
+            })
+            .collect()
+    }
+
+    fn draw_pose(&self, gfx: &Gfx, class: Option<u8>, rect: Rect, pose: Pose, alpha: f32) {
+        if let Some(index) = pose.extra_index() {
+            let fighter = class.map_or(0, |class| class as usize + 1);
+            if let Some(bitmap) = self.duel_poses[fighter]
+                .as_ref()
+                .and_then(|sheet| sheet[index].as_ref())
+            {
+                Self::draw_bitmap(gfx, bitmap, rect, alpha);
+                return;
+            }
+        }
+        if let Some(class) = class {
+            self.draw_duel_adventurer(gfx, class, rect);
+        } else {
+            self.draw(gfx, DUEL_BOSS, rect, alpha);
+        }
     }
 
     fn draw_adventurer(&self, gfx: &Gfx, class: u8, rect: Rect) {
@@ -229,12 +284,16 @@ impl Art {
     }
 
     fn draw(&self, gfx: &Gfx, id: usize, rect: Rect, alpha: f32) {
-        if let Some(Some((bitmap, ratio))) = self.bitmaps.get(id) {
-            let w = rect.w.min(rect.h * ratio);
-            let h = w / ratio;
-            let (x, y) = (rect.x + (rect.w - w) / 2.0, rect.y + (rect.h - h) / 2.0);
-            gfx.draw_bitmap_alpha(bitmap, x, y, x + w, y + h, alpha);
+        if let Some(Some(bitmap)) = self.bitmaps.get(id) {
+            Self::draw_bitmap(gfx, bitmap, rect, alpha);
         }
+    }
+
+    fn draw_bitmap(gfx: &Gfx, (bitmap, ratio): &Sprite, rect: Rect, alpha: f32) {
+        let w = rect.w.min(rect.h * ratio);
+        let h = w / ratio;
+        let (x, y) = (rect.x + (rect.w - w) / 2.0, rect.y + (rect.h - h) / 2.0);
+        gfx.draw_bitmap_alpha(bitmap, x, y, x + w, y + h, alpha);
     }
 }
 
@@ -326,6 +385,7 @@ pub(crate) struct Screen {
     overlay: Option<Overlay>,
     notice: Option<(String, f32)>,
     working: Option<(Cell, f32)>,
+    duel_animation: Option<Animation>,
 }
 
 impl Screen {
@@ -343,6 +403,7 @@ impl Screen {
             art: Art {
                 generation: 0,
                 bitmaps: Vec::new(),
+                duel_poses: std::array::from_fn(|_| None),
             },
             floor,
             order: Order::Inspect,
@@ -352,6 +413,7 @@ impl Screen {
             overlay: None,
             notice: None,
             working: None,
+            duel_animation: None,
         }
     }
 
@@ -419,6 +481,23 @@ impl Screen {
             x / self.gfx.ui - (self.gfx.width as f32 - W) / 2.0,
             y / self.gfx.ui - (self.gfx.height as f32 - H) / 2.0,
         )
+    }
+
+    fn duel_command(&mut self, command: Command) {
+        if self.duel_animation.is_some() {
+            return;
+        }
+        let Some(duel) = self.game.duel() else { return };
+        let old_enemy_hp = duel.hp;
+        let old_boss_hp = self.game.boss;
+        if let Some(turn) = self.game.duel_command(command) {
+            self.duel_animation = Some(Animation {
+                turn,
+                time: 0.0,
+                old_boss_hp,
+                old_enemy_hp,
+            });
+        }
     }
 
     fn start_raid(&mut self) {
@@ -510,12 +589,15 @@ impl Screen {
             return;
         }
         if let Some(duel) = self.game.duel() {
+            if self.duel_animation.is_some() {
+                return;
+            }
             if duel.outcome.is_some() {
                 if DUEL_NEXT.has(x, y) {
                     self.game.dismiss_duel();
                 }
             } else if let Some(index) = (0..4).find(|&index| duel_button(index).has(x, y)) {
-                self.game.duel_command(Command::ALL[index]);
+                self.duel_command(Command::ALL[index]);
             }
             return;
         }
@@ -580,6 +662,14 @@ impl Screen {
     }
 
     pub fn frame(&mut self, events: &[Event], dt: f32, focused: bool) {
+        if focused {
+            if let Some(animation) = self.duel_animation.as_mut() {
+                animation.time += dt.clamp(0.0, 0.25);
+                if animation.time >= TURN_TIME {
+                    self.duel_animation = None;
+                }
+            }
+        }
         let report_wave = self.game.last_report.as_ref().map(|report| report.wave);
         for &event in events {
             match event {
@@ -598,11 +688,14 @@ impl Screen {
                         && self.game.duel().is_some()
                         && key != 122 =>
                 {
+                    if self.duel_animation.is_some() {
+                        continue;
+                    }
                     let duel = self.game.duel().unwrap();
                     if duel.outcome.is_some() && (key == 13 || key == 32) {
                         self.game.dismiss_duel();
                     } else if (49..=52).contains(&key) {
-                        self.game.duel_command(Command::ALL[(key - 49) as usize]);
+                        self.duel_command(Command::ALL[(key - 49) as usize]);
                     }
                 }
                 Event::Key(112) => self.overlay = Some(Overlay::Help),
@@ -657,6 +750,11 @@ impl Screen {
         self.gfx.begin(BG);
         if self.gfx.d2d_begin() {
             self.art.load(&self.gfx);
+            if !self.title {
+                if let Some(duel) = self.game.duel() {
+                    self.art.load_duel(&self.gfx, duel.class);
+                }
+            }
             let x = (self.gfx.width as f32 - W) / 2.0;
             let y = (self.gfx.height as f32 - H) / 2.0;
             self.gfx.set_origin(x, y);
@@ -676,7 +774,7 @@ impl Screen {
             if self.title {
                 view.draw_title(&mut self.gfx, self.has_save);
             } else if let Some(duel) = self.game.duel() {
-                view.draw_duel(&mut self.gfx, duel);
+                view.draw_duel(&mut self.gfx, duel, self.duel_animation.as_ref());
             } else {
                 view.draw(&mut self.gfx);
             }
@@ -1399,7 +1497,7 @@ impl View<'_> {
         BESTIARY_CLOSE.button(g, "閉じる　Esc", true, true);
     }
 
-    fn draw_duel(&self, g: &mut Gfx, duel: &Duel) {
+    fn draw_duel(&self, g: &mut Gfx, duel: &Duel, animation: Option<&Animation>) {
         Rect::new(0.0, 0.0, W, H).fill(g, BG);
         let field = Rect::new(25.0, 82.0, 1190.0, 502.0);
         self.art.draw(g, ARENA, field, 1.0);
@@ -1407,20 +1505,33 @@ impl View<'_> {
         Rect::new(26.0, 24.0, 1188.0, 44.0).label(g, "玉座の戦い", Font::TitleMid, GOLD);
         let level = self.game.boss_level();
         let enemy = ADVENTURERS[duel.class as usize].name;
-        self.art.draw(
-            g,
-            DUEL_BOSS,
-            Rect::new(42.0, 225.0, 526.0, 356.0),
-            if self.game.boss > 0 { 1.0 } else { 0.35 },
+        let (boss_pose, enemy_pose) = animation.map_or_else(
+            || resting_poses(duel.outcome),
+            |animation| animation.poses(duel.outcome),
         );
-        self.art
-            .draw_duel_adventurer(g, duel.class, Rect::new(717.0, 94.0, 422.0, 374.0));
+        let (boss_hp, enemy_hp) = animation.map_or((self.game.boss, duel.hp), |animation| {
+            animation.hp(self.game.boss, duel.hp)
+        });
+        self.art.draw_pose(
+            g,
+            None,
+            Rect::new(42.0, 195.0, 526.0, 386.0),
+            boss_pose,
+            1.0,
+        );
+        self.art.draw_pose(
+            g,
+            Some(duel.class),
+            Rect::new(717.0, 89.0, 422.0, 388.0),
+            enemy_pose,
+            1.0,
+        );
         for (x, y, name, hp, max_hp, mp, max_mp, color) in [
             (
                 829.0,
                 462.0,
                 format!("氷の主　Lv.{level}"),
-                self.game.boss,
+                boss_hp,
                 self.game.max_boss(),
                 duel.boss_mp,
                 boss_mp(level),
@@ -1430,7 +1541,7 @@ impl View<'_> {
                 55.0,
                 102.0,
                 format!("{enemy}　Lv.{}", duel.level),
-                duel.hp,
+                enemy_hp,
                 duel.max_hp,
                 duel.mp,
                 duel.max_mp,
@@ -1460,7 +1571,12 @@ impl View<'_> {
             Font::Normal,
             GOLD,
         );
-        for (index, line) in duel.lines.iter().enumerate() {
+        for (index, line) in duel
+            .lines
+            .iter()
+            .take(animation.map_or(3, Animation::message_count))
+            .enumerate()
+        {
             Rect::new(48.0, 644.0 + index as f32 * 30.0, 767.0, 24.0).label(
                 g,
                 line,
@@ -1469,7 +1585,9 @@ impl View<'_> {
             );
         }
         Rect::new(865.0, 599.0, 350.0, 152.0).panel(g, PANEL, GOLD);
-        if duel.outcome.is_some() {
+        if animation.is_some() {
+            Rect::new(880.0, 642.0, 320.0, 44.0).label(g, "攻防中", Font::NormalCenter, GOLD);
+        } else if duel.outcome.is_some() {
             DUEL_NEXT.button(g, "次へ　[Enter]", true, true);
         } else {
             for (index, command) in Command::ALL.into_iter().enumerate() {
