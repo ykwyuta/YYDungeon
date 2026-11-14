@@ -152,3 +152,9 @@ Create a single 3 by 3 game animation sprite sheet of same dark-haired swordmast
 ### 勇者
 
 Sprite atlas on transparent alpha for the reference adult JRPG hero with blue gold plate and white cape. Strict 3x3 grid, 9 isolated whole-body sprites with generous gutters; top row sword attack facing left, casting normal magic, luminous ultimate sword slash; middle row heavy hurt recoiling no blood, blocking, on knee defeated; bottom row running away right, charging lightning, sword held up victoriously. Preserve identity and front three-quarter camera. No labels, independent cells, no background or shadow.
+
+### レイラの本の修正
+
+既存の立ち絵を参照し、組み込み ImageGen で本の綴じ目、表紙、ページの遠近、両手の接点を修正しました。
+
+Precisely edit the existing transparent game portrait. Fix ONLY the open book and its immediate contact with the hands. This is one medium-sized open leather-bound dungeon plans notebook held comfortably at chest/waist height, in the same position/size as the reference. Draw a single continuous central spine, two clearly attached matching covers, a consistent V formed by the left and right page blocks, and continuous thin layered page edges. The folded outer cover follows the pages; nothing sticks out separately or doubles up. Simple faint ink maze plans rest flat on the pages and obey the paper perspective. Her left hand in lower right of image supports the bottom of the right cover from underneath with a natural grip; her right hand on image left lightly touches the outer edge of the left page, with naturally curved fingers, exactly one anatomically plausible hand at each existing wrist. No extra fingers or objects. Preserve as exactly as possible the original face, expression, purple skin, hair, horns, jewelry, jacket, cuffs, arms beyond fingers, silhouette, crop, painters' palette and warm rim lighting. Preserve true transparent background, no text or scenery. The book must look like a physically plausible open book.
