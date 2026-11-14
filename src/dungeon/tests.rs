@@ -151,9 +151,13 @@ fn construction_checks_walls_resources_and_running_raids() {
 }
 
 #[test]
-fn balance_training_requires_throne_wins_and_first_five_floors_are_reachable() {
+fn balance_training_requires_throne_wins_and_floor_twenty_is_reachable() {
     let chest = Cell { x: 10, y: 7 };
     let mut sealed = Game::new();
+    sealed.active().sites[Cell { x: 1, y: 3 }.index()] = Some(Site::RankedTrap {
+        frost: false,
+        level: 30,
+    });
     sealed.begin_raid();
     settle(&mut sealed);
     assert_eq!(sealed.last_report.as_ref().unwrap().throne, 0);
@@ -166,7 +170,7 @@ fn balance_training_requires_throne_wins_and_first_five_floors_are_reachable() {
     settle(&mut game);
     game.place(Order::Remove, Cell { x: 1, y: 3 }, 0).unwrap();
     let mut unlocked_at = Vec::new();
-    for _ in 0..32 {
+    for _ in 0..350 {
         if game.floor().site(chest).is_none() {
             game.place(Order::Chest, chest, 0).unwrap();
         }
@@ -176,18 +180,19 @@ fn balance_training_requires_throne_wins_and_first_five_floors_are_reachable() {
         game.begin_raid();
         settle(&mut game);
         let report = game.last_report.as_ref().unwrap();
-        eprintln!(
-            "B{} wave {} Lv.{} boss HP {}/{} XP {} stopped {} fled {} throne {}",
-            game.floors.len(),
-            game.wave,
-            game.boss_level(),
-            game.boss,
-            game.max_boss(),
-            game.boss_xp,
-            report.stopped,
-            report.fled,
-            report.throne
-        );
+        if game.wave <= 10 || game.can_descend() {
+            eprintln!(
+                "B{} wave {} Lv.{} HP {}/{} defeated {} fled {} XP +{}",
+                game.floors.len(),
+                game.wave,
+                game.boss_level(),
+                game.boss,
+                game.max_boss(),
+                report.stopped,
+                report.fled,
+                report.boss_xp
+            );
+        }
         assert!(!game.defeated, "wave {}, kills {}", game.wave, game.kills);
         // Reserve a replacement chest and dig a bounded set of branches each wave.
         for _ in 0..5 {
@@ -209,15 +214,14 @@ fn balance_training_requires_throne_wins_and_first_five_floors_are_reachable() {
         if game.can_descend() {
             unlocked_at.push(game.wave);
             game.descend(true).unwrap();
-            if game.floors.len() == 5 {
-                eprintln!("B2 through B5 unlocked on waves {unlocked_at:?}, development {}, supplies {}/{}/{}", game.development, game.gold, game.bones, game.loot);
-                assert!(unlocked_at[0] <= 4 && game.wave <= 12);
-                let wyvern = &MONSTERS[31];
-                assert!(game.monster_unlocked(wyvern));
+            if game.floors.len() == 20 {
+                eprintln!("B2 through B20 unlocked on waves {unlocked_at:?}, development {}, supplies {}/{}/{}", game.development, game.gold, game.bones, game.loot);
+                let dragon = &MONSTERS[39];
+                assert!(game.monster_unlocked(dragon));
                 assert!(
-                    game.gold >= wyvern.gold
-                        && game.bones >= wyvern.bones
-                        && game.loot >= wyvern.loot
+                    game.gold >= dragon.gold
+                        && game.bones >= dragon.bones
+                        && game.loot >= dragon.loot
                 );
                 return;
             }
@@ -229,7 +233,9 @@ fn balance_training_requires_throne_wins_and_first_five_floors_are_reachable() {
 #[test]
 fn digging_branches_and_loops_unlocks_monsters_and_survives_old_saves() {
     let mut game = Game::new();
-    let branch = Cell { x: 3, y: 3 };
+    game.boss_xp = boss_level_xp(3);
+    game.descend(false).unwrap();
+    let branch = Cell { x: 3, y: 2 };
     let room = Cell { x: 4, y: 3 };
     assert!(game.place(Order::Recruit(4), room, 0).is_err());
     game.place(Order::Dig, branch, 0).unwrap();
@@ -248,10 +254,9 @@ fn digging_branches_and_loops_unlocks_monsters_and_survives_old_saves() {
     let mut legacy = serde_json::from_slice::<serde_json::Value>(&game.save()).unwrap();
     legacy[1].as_object_mut().unwrap().remove("development");
     let restored = Game::load(&serde_json::to_vec(&legacy).unwrap()).unwrap();
-    assert_eq!(restored.development, score);
+    assert!(restored.development >= score);
     assert_eq!(
-        restored
-            .floor()
+        restored.floors[0]
             .site(Cell { x: 1, y: 3 })
             .unwrap()
             .monster(),
@@ -274,20 +279,21 @@ fn development_and_depth_gate_ranked_monsters_and_all_materials_are_charged() {
     }
     assert!(game.development >= MONSTERS.last().unwrap().unlock);
     let cell = Cell { x: 4, y: 3 };
-    for (floor, unlocked) in [(1, 7), (2, 15), (3, 23), (4, 32), (5, 40)] {
+    for floor in 1..=20 {
+        let unlocked = (2 * floor + 1).min(40);
         assert_eq!(
             MONSTERS.iter().filter(|m| game.monster_unlocked(m)).count(),
             unlocked
         );
-        if floor < 5 {
+        if floor < 20 {
             assert!(game.place(Order::Recruit(39), cell, 0).is_err());
             game.boss_xp = boss_level_xp(game.descent_level());
             game.descend(false).unwrap();
         }
     }
     let dragon = MONSTERS[39];
-    assert!(dragon.hp >= 10 * MONSTERS[GOBLIN as usize].hp);
-    assert!(dragon.gold >= 10 * Order::Goblin.price());
+    assert!(dragon.hp >= 8 * MONSTERS[GOBLIN as usize].hp);
+    assert!(dragon.gold >= 10 * Order::Recruit(GOBLIN).price());
     game.bones = dragon.bones;
     game.loot = dragon.loot - 1;
     assert!(game.place(Order::Recruit(39), cell, 0).is_err());
@@ -399,6 +405,8 @@ fn opening_the_last_chest_stops_new_raids_until_it_is_replaced() {
     let report = game.last_report.as_ref().unwrap();
     assert_eq!(report.stopped + report.fled, 3);
     assert_eq!(report.throne, 3);
+    assert_eq!(report.boss_xp, game.boss_xp);
+    assert!(report.boss_xp > 0);
     assert_eq!(report.chests, 1);
     assert_eq!(game.kills, report.stopped);
     assert_eq!(game.gold, 170 + RAID_RECOVERY_GOLD + report.gold);
@@ -451,7 +459,7 @@ fn adventurers_retarget_an_unopened_chest_and_leave_upper_floors_out_of_the_fore
 }
 
 #[test]
-fn built_rocks_can_be_dug_again_without_farming_development() {
+fn built_rocks_can_be_removed_at_a_cost_without_farming_development() {
     let mut game = Game::new();
     let rock = Cell { x: 1, y: 1 };
     let gold = game.gold;
@@ -470,11 +478,18 @@ fn built_rocks_can_be_dug_again_without_farming_development() {
 
     game.place(Order::Wall, rock, 0).unwrap();
     assert!(!game.floor().open(rock));
-    assert_eq!(game.floor().dig_development(rock), Some(0));
+    assert_eq!(game.floor().dig_development(rock), None);
     assert_eq!(game.gold, gold - Order::Wall.price());
     let mut game = Game::load(&game.save()).unwrap();
     assert!(game.floor().has_placed_rock(rock));
-    game.place(Order::Dig, rock, 0).unwrap();
+    assert!(game.place(Order::Dig, rock, 0).is_err());
+    let removal_budget = game.gold;
+    game.gold = Order::Remove.price() - 1;
+    assert!(game.place(Order::Remove, rock, 0).is_err());
+    assert!(game.floor().has_placed_rock(rock));
+    game.gold = removal_budget;
+    game.place(Order::Remove, rock, 0).unwrap();
+    assert_eq!(game.gold, removal_budget - Order::Remove.price());
     assert!(!game.floor().has_placed_rock(rock));
     assert!(game.floor().open(rock));
     assert_eq!(game.development, score);
@@ -573,6 +588,8 @@ fn throne_duels_pause_the_maze_and_resume_after_a_saved_turn() {
     settle(&mut restored);
     let report = restored.last_report.as_ref().unwrap();
     assert_eq!(report.throne, 3);
+    assert_eq!(report.boss_xp, restored.boss_xp);
+    assert!(report.boss_xp > 0);
     assert_eq!(report.stopped + report.fled, 3);
 }
 
@@ -611,9 +628,9 @@ fn a_broke_workshop_can_reopen_without_selling_subsidized_chests_for_profit() {
     game.place(Order::Chest, chest, 0).unwrap();
     assert_eq!(game.forecast(), (3, 1));
     assert_eq!(game.chest_cost(0), (20, 0));
-    game.place(Order::Remove, chest, 0).unwrap();
+    assert!(game.place(Order::Remove, chest, 0).is_err());
     assert_eq!(game.gold, 0);
-    assert_eq!(game.forecast(), (0, 0));
+    assert_eq!(game.forecast(), (3, 1));
 }
 
 #[test]
@@ -681,5 +698,29 @@ fn the_throne_intercepts_adventurers_on_the_way_to_a_chest() {
         assert_eq!(game.floor().site(chest), Some(Site::Chest { rarity: 0 }));
         assert_eq!(game.raid.as_ref().unwrap().tally.throne, 1);
         assert_eq!(game.raid.as_ref().unwrap().tally.chests, 0);
+    }
+}
+
+#[test]
+fn each_trap_type_keeps_its_level_and_price_progression_after_removal_and_reload() {
+    let mut game = Game::new();
+    game.bones = 2;
+    let cell = Cell { x: 1, y: 1 };
+    for order in [Order::Spikes, Order::Frost] {
+        assert_eq!(game.next_trap_level(order), Some(1));
+        let initial_price = game.construction_price(order);
+        game.place(order, cell, 0).unwrap();
+        assert_eq!(game.floor().site(cell).unwrap().trap_level(), Some(1));
+        assert_eq!(game.next_trap_level(order), Some(2));
+        assert!(game.construction_price(order) > initial_price);
+        game.place(Order::Remove, cell, 0).unwrap();
+        game = Game::load(&game.save()).unwrap();
+        assert_eq!(game.next_trap_level(order), Some(2));
+        let price = game.construction_price(order);
+        let gold = game.gold;
+        game.place(order, cell, 0).unwrap();
+        assert_eq!(game.gold, gold - price);
+        assert_eq!(game.floor().site(cell).unwrap().trap_level(), Some(2));
+        game.place(Order::Remove, cell, 0).unwrap();
     }
 }

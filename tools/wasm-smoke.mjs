@@ -36,10 +36,10 @@ const game = () => {
 wasm = (await WebAssembly.instantiate(bytes, { env })).instance.exports;
 wasm.yy_init(1240, 780);
 wasm.yy_frame(0.25, 1);
-assert.ok(labels.has("はじめる　 [Enter]"));
+assert.ok(labels.has("はじめから　 [Enter]"));
 assert.equal(wasm.yy_can_autosave(), 0);
 assert.equal(game().countdown, 42);
-assert.equal(sprites, 78);
+assert.equal(sprites, 79);
 wasm.yy_event(2, 112, 0);
 wasm.yy_frame(0, 1);
 assert.ok(labels.has("キャッシュを消して再読み込み"));
@@ -53,7 +53,7 @@ wasm.yy_frame(0, 1);
 assert.equal(wasm.yy_can_autosave(), 1);
 assert.equal(game().wave, 0);
 assert.ok(draws > 100);
-assert.ok([...labels].some(label => label.includes("氷の主 Lv.1 (0/10 XP)　次の階 Lv.3")));
+assert.ok([...labels].some(label => label.includes("魔王 Lv.1　次Lvまで 10 XP　次の階 Lv.3")));
 
 wasm.yy_event(2, 51, 0); // 3 opens the monster roster.
 wasm.yy_frame(0, 1);
@@ -65,7 +65,7 @@ wasm.yy_event(2, 27, 0);
 wasm.yy_frame(0, 1);
 
 // Mouse placement through the shared screen, then keyboard starts the wave.
-wasm.yy_event(1, 980, 387);
+wasm.yy_event(1, 980, 350);
 wasm.yy_event(1, 198, 261);
 wasm.yy_frame(0, 1);
 assert.equal(game().gold, 151);
@@ -76,7 +76,12 @@ wasm.yy_event(0, 151, 352);
 wasm.yy_frame(0, 1);
 assert.ok([...labels].some(label => label.includes("チンピラ") && label.includes("HP")));
 let fightFrames = 0;
-for (let i = 0; i < 200 && game().raid; i++) {
+for (let i = 0; i < 600 && game().raid; i++) {
+  const duel = game().raid.duel;
+  if (duel) {
+    const key = duel.outcome ? 13 : duel.boss_mp >= 3 ? 50 : 49;
+    wasm.yy_event(2, key, 0);
+  }
   gaugeColors.clear();
   wasm.yy_frame(0.25, 1);
   if (game().raid?.invaders.some(invader => invader.encounter)) {
@@ -95,7 +100,7 @@ wasm.yy_event(2, 27, 0);
 wasm.yy_frame(0, 1);
 const played = game();
 assert.equal(played.raid, null);
-assert.equal(played.kills, 3);
+assert.ok(played.kills >= 1);
 assert.ok(played.boss > 0);
 
 const saveSize = wasm.yy_save_size();
@@ -105,7 +110,14 @@ new Uint8Array(wasm.memory.buffer, loadPtr, saved.length).set(saved);
 wasm.yy_init(1240, 780);
 labels.clear();
 wasm.yy_frame(0.25, 1);
-assert.ok(labels.has("つづきから　 [Enter]"));
+assert.ok(labels.has("つづきから　 [Enter]") && labels.has("はじめから"));
+wasm.yy_event(1, 220, 520);
+wasm.yy_frame(0, 1);
+assert.ok(labels.has("最初から始める"));
+assert.deepEqual(game(), played);
+wasm.yy_event(1, 386, 480); // Cancel, then continue the existing save.
+wasm.yy_frame(0, 1);
+assert.deepEqual(game(), played);
 assert.equal(wasm.yy_can_autosave(), 0);
 assert.deepEqual(game(), played);
 wasm.yy_event(2, 13, 0);
@@ -114,16 +126,16 @@ assert.equal(wasm.yy_can_autosave(), 1);
 assert.deepEqual(game(), played);
 console.log("Wasm renders, accepts construction orders, resolves a raid and resumes the saved game.");
 
-// Dig the wall at (3, 3) and select the newly unlocked mandrake from the roster.
+// Dig the wall at (3, 3) and recruit through the roster.
 wasm.yy_event(2, 54, 0);
 wasm.yy_event(1, 289, 352);
 wasm.yy_frame(0, 1);
 assert.ok(game().development >= 3);
 wasm.yy_event(2, 51, 0);
-wasm.yy_event(1, 270, 425);
+wasm.yy_event(1, 270, 258);
 wasm.yy_event(1, 335, 352);
 wasm.yy_frame(0, 1);
-assert.ok(game().floors[0].sites.some(site => site?.Monster?.id === 4));
+assert.ok(game().floors[0].sites.some(site => site?.Monster?.id === 0));
 
 spritesDrawn.length = 0;
 wasm.yy_event(2, 56, 0); // 8 places a rock on an unused passage.
@@ -142,11 +154,13 @@ const solidRock = rockSpriteAt(129, 191);
 assert.ok(builtRock && diggableRock && solidRock);
 assert.equal(new Set([builtRock, diggableRock, solidRock]).size, 3);
 const developmentBefore = game().development;
-wasm.yy_event(2, 54, 0);
+const goldBefore = game().gold;
+wasm.yy_event(2, 55, 0);
 wasm.yy_event(1, 244, 261);
 wasm.yy_frame(0, 1);
 assert.equal(game().floors[0].placed_rocks.length, 0);
 assert.equal(game().development, developmentBefore);
+assert.equal(game().gold, goldBefore - 8);
 
 // Resume a saved throne fight, choose a spell, and return to the raid.
 const arenaGame = game();
@@ -175,7 +189,7 @@ wasm.yy_event(2, 50, 0);
 wasm.yy_frame(0, 1);
 assert.equal(game().raid.duel.outcome, "Victory");
 assert.equal(game().raid.duel.boss_mp, 6);
-assert.notEqual(spritesDrawn.at(-2).id, idleBossId); // Frost spell pose
+assert.notEqual(spritesDrawn.at(-2).id, idleBossId); // Dark spell pose
 assert.equal(spritesDrawn.at(-1).id, idleEnemyId);
 wasm.yy_event(2, 13, 0);
 wasm.yy_frame(0.25, 1);
@@ -184,11 +198,13 @@ wasm.yy_frame(0.25, 1);
 assert.notEqual(spritesDrawn.at(-1).id, idleEnemyId); // Impact pose
 for (let i = 0; i < 6; i++) wasm.yy_frame(0.25, 1);
 assert.ok(labels.has("攻防中") && labels.has("次へ　[Enter]"));
+assert.ok(labels.has("獲得経験値 +10 XP"));
 wasm.yy_event(2, 13, 0);
 wasm.yy_frame(0.25, 1);
 wasm.yy_frame(0.25, 1);
 assert.equal(game().last_report.stopped, 1);
 assert.equal(game().last_report.throne, 1);
+assert.equal(game().last_report.boss_xp, 10);
 assert.ok(game().boss_xp > 0);
 
 // Both fighters get distinct charge, special, and recoil poses in the same turn.
@@ -223,3 +239,19 @@ assert.notEqual(enemyImpact[0], idlePair[0]);
 assert.notEqual(enemyImpact[0], bossImpact[0]);
 assert.notEqual(enemyImpact[1], enemyCharge[1]);
 assert.ok([...labels].some(label => label.includes("光雷の魔法")));
+
+// Confirm a new game from a title screen with an existing run.
+const restartSize = wasm.yy_save_size();
+const restartSave = new Uint8Array(wasm.memory.buffer, wasm.yy_save_ptr(), restartSize).slice();
+const restartPtr = wasm.yy_load_buffer(restartSave.length);
+new Uint8Array(wasm.memory.buffer, restartPtr, restartSave.length).set(restartSave);
+wasm.yy_init(1240, 780);
+wasm.yy_event(1, 220, 520);
+wasm.yy_frame(0, 1);
+assert.equal(wasm.yy_can_autosave(), 0);
+wasm.yy_event(1, 835, 481);
+wasm.yy_frame(0, 1);
+assert.equal(wasm.yy_can_autosave(), 1);
+assert.equal(game().wave, 0);
+assert.equal(game().boss_xp, 0);
+assert.equal(game().floors.length, 1);

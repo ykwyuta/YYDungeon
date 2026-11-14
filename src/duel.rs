@@ -14,10 +14,10 @@ impl Command {
 
     pub fn name(self) -> &'static str {
         match self {
-            Self::Claw => "爪撃",
-            Self::Frost => "氷の魔法",
+            Self::Claw => "魔刃",
+            Self::Frost => "闇の魔法",
             Self::Guard => "防御",
-            Self::Storm => "極寒の嵐",
+            Self::Storm => "冥界の嵐",
         }
     }
 
@@ -127,14 +127,14 @@ impl Duel {
             let recovery = 2.min(boss_mp(boss_level) - self.boss_mp);
             self.boss_mp += recovery;
             self.lines.push(if recovery == 0 {
-                "氷の主は身を守った。".into()
+                "魔王は身を守った。".into()
             } else {
-                format!("氷の主は身を守り、MPを{recovery}回復した。")
+                format!("魔王は身を守り、MPを{recovery}回復した。")
             });
         } else {
             self.hp = self.hp.saturating_sub(damage);
             self.lines.push(format!(
-                "氷の主の{}！　{}に{damage}ダメージ。",
+                "魔王の{}！　{}に{damage}ダメージ。",
                 command.name(),
                 enemy.name
             ));
@@ -185,12 +185,12 @@ impl Duel {
         }
         *boss_hp = boss_hp.saturating_sub(damage);
         self.lines.push(format!(
-            "{}の{attack}！　氷の主に{damage}ダメージ。",
+            "{}の{attack}！　魔王に{damage}ダメージ。",
             enemy.name
         ));
         if *boss_hp == 0 {
             self.outcome = Some(Outcome::Defeat);
-            self.lines.push("氷の主は倒れた。".into());
+            self.lines.push("魔王は倒れた。".into());
         }
         Some(turn)
     }

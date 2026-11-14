@@ -170,3 +170,8 @@ Edit the existing transparent game portrait of Leila. Completely remove the open
 掘削できる自然岩、設置した岩壁、掘削できない岩盤の3枚を組み込み ImageGen で生成し、透過PNGに切り出しました。
 
 Create a game tiles sprite atlas for a Japanese dark fantasy dungeon strategy game. EXACTLY 3 tiles in one horizontal row, divided conceptually into 3 equal squares with generous alpha-transparent gutters, no grid lines, each icon 78% of its own square and independent. LEFT: excavatable warm copper ochre boulder rubble, visibly fractured into three jutting chunks, large distinct pale amber cracks; CENTER: player-built square stone barricade, three orderly tiers of neat indigo-blue rectangular masonry blocks with dark vertical corner braces and pale mortar, straight organized flat top; RIGHT: undiggable bedrock, one solid almost black graphite basalt monolith with a broad flat slate surface, chunky angular silhouette and slate highlights, no masonry or fissures. Draw each as a simple bold isometric dungeon tile with a slightly elevated front view, painterly retro fantasy style and readable at 28 pixels, clear shape differences, genuine transparent background and standalone icons. No floor, people, letters, text, shadows outside the shapes, labels, or additional objects.
+
+
+### 魔王
+
+組み込み ImageGen で生成しました。銀髪、黒い角と金の王冠、金縁の黒い甲冑、深紅のマントの魔王を、正面の全身像（`assets/demon-king.png`）と、右奥の敵と向き合う背面の戦闘ポーズ（`assets/demon-king-back.png`、`assets/duel-poses/demon-king.webp`）で描きました。戦闘素材は既存の9姿勢の順番に並べています。氷の主の正面画像は委任フロアの玉座で使います。

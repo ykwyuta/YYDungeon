@@ -1,7 +1,7 @@
 use crate::adventurers::ADVENTURERS;
 
 pub const SHEETS: [&[u8]; ADVENTURERS.len() + 1] = [
-    include_bytes!("../assets/duel-poses/boss.webp"),
+    include_bytes!("../assets/duel-poses/demon-king.webp"),
     include_bytes!("../assets/duel-poses/00.webp"),
     include_bytes!("../assets/duel-poses/01.webp"),
     include_bytes!("../assets/duel-poses/02.webp"),

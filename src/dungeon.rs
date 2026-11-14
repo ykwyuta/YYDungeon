@@ -22,6 +22,7 @@ const COMBAT_ROUNDS: u8 = 3;
 const COMBAT_INTERVAL: u8 = 2;
 const SPIKE_DAMAGE: i32 = 7;
 const FROST_DAMAGE: i32 = 5;
+const MAX_TRAP_LEVEL: u32 = 100_000;
 const RAID_MAX: usize = 32;
 const MIN_ACTIVE_INVADERS: usize = 2;
 const DUEL_MP_RECOVERY: u8 = 2;
@@ -80,13 +81,13 @@ pub enum Site {
     Monster { id: u8, hp: u16 },
     Spikes,
     Frost,
+    RankedTrap { frost: bool, level: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Order {
     Inspect,
     Chest,
-    Goblin,
     Bestiary,
     Recruit(u8),
     Spikes,
@@ -97,9 +98,8 @@ pub enum Order {
 }
 
 impl Order {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 7] = [
         Self::Chest,
-        Self::Goblin,
         Self::Bestiary,
         Self::Spikes,
         Self::Frost,
@@ -112,7 +112,6 @@ impl Order {
         match self {
             Self::Inspect => "調べる",
             Self::Chest => "宝箱",
-            Self::Goblin => "ゴブリン",
             Self::Bestiary => "仲間モンスター図鑑",
             Self::Recruit(id) => MONSTERS[id as usize].name,
             Self::Spikes => "針の罠",
@@ -125,9 +124,9 @@ impl Order {
 
     pub fn price(self) -> u32 {
         match self {
-            Self::Inspect | Self::Remove => 0,
+            Self::Inspect => 0,
+            Self::Remove => 8,
             Self::Chest => 20,
-            Self::Goblin => 28,
             Self::Bestiary => 0,
             Self::Recruit(id) => MONSTERS[id as usize].gold,
             Self::Spikes => 19,
@@ -156,27 +155,27 @@ impl Order {
         match self {
             Self::Inspect => "床や壁を選ぶと、その区画の情報を確認できます。",
             Self::Chest => "冒険者が開けると宝箱は消えます。宝箱がある間は襲撃が来ます。",
-            Self::Goblin => "通路で冒険者を足止めし、数回攻防します。",
             Self::Bestiary => "迷路を掘って、新しい魔物を仲間にできます。",
             Self::Recruit(_) => "空いている通路を選ぶと、仲間を配置します。",
-            Self::Spikes => "踏んだ冒険者に7ダメージを与えます。",
-            Self::Frost => "5ダメージを与え、冒険者を2手止めます。",
+            Self::Spikes => "ダメージを与えます。設置するたび次の針の罠が強くなります。",
+            Self::Frost => "ダメージを与えて足止めします。設置するたび次の氷結の罠が強くなります。",
             Self::Dig => "通路に接した内壁を掘り、迷路に新しい道を作ります。",
-            Self::Remove => "設置物を片付けます。宝箱以外の設置物を撤去すると金貨5を回収します。",
-            Self::Wall => "空き床を岩でふさぎます。置いた岩は掘削で取り除けます。",
+            Self::Remove => "選んだ設置物や岩壁を金貨8で撤去します。",
+            Self::Wall => "空き床を岩でふさぎます。置いた岩は撤去で取り除けます。",
         }
     }
 
-    fn site(self, rarity: u8) -> Option<Site> {
+    fn site(self, rarity: u8, trap_level: u32) -> Option<Site> {
         Some(match self {
             Self::Chest => Site::Chest { rarity },
-            Self::Goblin => Site::Goblin { hp: 38 },
             Self::Recruit(id) => Site::Monster {
                 id,
                 hp: MONSTERS.get(id as usize)?.hp,
             },
-            Self::Spikes => Site::Spikes,
-            Self::Frost => Site::Frost,
+            Self::Spikes | Self::Frost => Site::RankedTrap {
+                frost: self == Self::Frost,
+                level: trap_level,
+            },
             _ => return None,
         })
     }
@@ -186,11 +185,11 @@ impl Site {
     pub fn order(self) -> Order {
         match self {
             Self::Chest { .. } => Order::Chest,
-            Self::Goblin { .. } => Order::Goblin,
+            Self::Goblin { .. } => Order::Recruit(GOBLIN),
             Self::Sentinel { .. } => Order::Recruit(SENTINEL),
             Self::Monster { id, .. } => Order::Recruit(id),
-            Self::Spikes => Order::Spikes,
-            Self::Frost => Order::Frost,
+            Self::Spikes | Self::RankedTrap { frost: false, .. } => Order::Spikes,
+            Self::Frost | Self::RankedTrap { frost: true, .. } => Order::Frost,
         }
     }
 
@@ -217,7 +216,15 @@ impl Site {
     }
 
     fn is_trap(self) -> bool {
-        matches!(self, Self::Spikes | Self::Frost)
+        self.trap_level().is_some()
+    }
+
+    pub fn trap_level(self) -> Option<u32> {
+        match self {
+            Self::Spikes | Self::Frost => Some(1),
+            Self::RankedTrap { level, .. } => Some(level),
+            _ => None,
+        }
     }
 }
 
@@ -400,7 +407,13 @@ impl Floor {
 
     pub fn dig_development(&self, cell: Cell) -> Option<u32> {
         let (w, h) = self.size();
-        if cell.x == 0 || cell.y == 0 || cell.x >= w - 1 || cell.y >= h - 1 || self.open(cell) {
+        if cell.x == 0
+            || cell.y == 0
+            || cell.x >= w - 1
+            || cell.y >= h - 1
+            || self.open(cell)
+            || self.has_placed_rock(cell)
+        {
             return None;
         }
         let adjacent: Vec<_> = cell.neighbors().filter(|&next| self.open(next)).collect();
@@ -418,11 +431,7 @@ impl Floor {
             })
             .count() as u32
             + links.saturating_sub(2);
-        Some(if self.has_placed_rock(cell) {
-            0
-        } else {
-            1 + new_branches + 2 * (links - 1)
-        })
+        Some(1 + new_branches + 2 * (links - 1))
     }
 
     pub fn development(&self, depth: usize) -> u32 {
@@ -556,6 +565,8 @@ pub struct Report {
     pub bones: u32,
     pub loot: u32,
     pub chests: u32,
+    #[serde(default)]
+    pub boss_xp: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -571,6 +582,8 @@ pub struct Game {
     pub boss: u32,
     #[serde(default = "missing_progress")]
     boss_xp: u32,
+    #[serde(default)]
+    traps_built: [u32; 2],
     pub countdown: f32,
     pub paused: bool,
     pub log: Vec<String>,
@@ -601,6 +614,7 @@ impl Game {
             wave: 0,
             boss: 110,
             boss_xp: 0,
+            traps_built: [0; 2],
             countdown: PREPARE,
             paused: false,
             log: vec!["秘書レイラ：宝箱までの予想経路を確認し、分岐の手前を守りましょう。".into()],
@@ -642,20 +656,25 @@ impl Game {
         self.floors.len() >= monster.floor && self.development >= monster.unlock
     }
 
-    fn gain_boss_experience(&mut self, level: u32) {
+    pub fn boss_experience_reward(&self, enemy_level: u32) -> u32 {
+        (6 + combat_power(enemy_level)).min(MAX_BOSS_XP - self.boss_xp)
+    }
+
+    fn gain_boss_experience(&mut self, level: u32) -> u32 {
         let old_level = self.boss_level();
         let old_max = self.max_boss();
-        let earned = (6 + combat_power(level)).min(MAX_BOSS_XP - self.boss_xp);
+        let earned = self.boss_experience_reward(level);
         self.boss_xp += earned;
         let new_level = self.boss_level();
         self.boss += self.max_boss() - old_max;
         if new_level > old_level {
             self.message(format!(
-                "氷の主は経験値 +{earned} を得て、Lv.{new_level}になりました。"
+                "魔王は経験値 +{earned} を得て、Lv.{new_level}になりました。"
             ));
         } else {
-            self.message(format!("氷の主の経験値 +{earned}"));
+            self.message(format!("魔王の経験値 +{earned}"));
         }
+        earned
     }
 
     pub fn duel(&self) -> Option<&Duel> {
@@ -685,7 +704,7 @@ impl Game {
                     duel.class,
                     raid.reward_rarity,
                 );
-                self.gain_boss_experience(duel.level);
+                raid.tally.boss_xp += self.gain_boss_experience(duel.level);
             }
             Outcome::Fled => {
                 raid.tally.fled += 1;
@@ -697,7 +716,7 @@ impl Game {
             Outcome::Defeat => {
                 self.defeated = true;
                 self.last_report = Some(raid.tally);
-                self.message("氷の主が倒れ、迷宮は陥落しました。");
+                self.message("魔王が倒れ、迷宮は陥落しました。");
                 return;
             }
         }
@@ -741,6 +760,23 @@ impl Game {
         (gold, u32::from(rarity))
     }
 
+    pub fn next_trap_level(&self, order: Order) -> Option<u32> {
+        let index = match order {
+            Order::Spikes => 0,
+            Order::Frost => 1,
+            _ => return None,
+        };
+        Some((self.traps_built[index] + 1).min(MAX_TRAP_LEVEL))
+    }
+
+    pub fn construction_price(&self, order: Order) -> u32 {
+        let step = if order == Order::Spikes { 7 } else { 10 };
+        order.price()
+            + self
+                .next_trap_level(order)
+                .map_or(0, |level| (level - 1) * step)
+    }
+
     pub fn place(&mut self, order: Order, cell: Cell, rarity: u8) -> Result<(), &'static str> {
         if self.defeated || self.running() {
             return Err("建設は襲撃と襲撃の間にできます。");
@@ -762,16 +798,28 @@ impl Game {
         let (w, h) = self.floor().size();
         let old = self.floor().site(cell);
         if order == Order::Remove {
-            if old.is_none() {
+            let wall = self.floor().has_placed_rock(cell);
+            if old.is_none() && !wall {
                 return Err("この区画に撤去できるものはありません。");
             }
-            self.active().sites[cell.index()] = None;
-            if matches!(old, Some(Site::Chest { .. })) {
-                self.message("ゴブリンが宝箱を片付けました。");
-            } else {
-                self.gold += 5;
-                self.message("ゴブリンが設置物を片付けました。金貨 +5");
+            let price = order.price();
+            if self.gold < price {
+                return Err("撤去するための金貨が足りません。");
             }
+            self.gold -= price;
+            let floor = self.active();
+            if wall {
+                floor.open[cell.index()] = true;
+                floor.placed_rocks.retain(|&rock| rock != cell);
+            } else {
+                floor.sites[cell.index()] = None;
+            }
+            let name = if wall {
+                "岩壁"
+            } else {
+                old.expect("removable site").order().name()
+            };
+            self.message(format!("ゴブリンが{name}を撤去しました。金貨 -{price}"));
             return Ok(());
         }
         if order == Order::Wall {
@@ -797,10 +845,13 @@ impl Game {
             }
             floor.placed_rocks.push(cell);
             self.gold -= order.price();
-            self.message("ゴブリンが岩壁を築きました。掘削すると通路に戻せます。");
+            self.message("ゴブリンが岩壁を築きました。撤去すると通路に戻せます。");
             return Ok(());
         }
         if order == Order::Dig {
+            if self.floor().has_placed_rock(cell) {
+                return Err("設置した岩壁には撤去を使ってください。");
+            }
             if cell.x == 0 || cell.y == 0 || cell.x == w - 1 || cell.y == h - 1 {
                 return Err("フロアの外壁は掘れません。");
             }
@@ -814,11 +865,6 @@ impl Game {
             self.gold -= order.price();
             let floor = self.active();
             floor.open[cell.index()] = true;
-            if gain == 0 {
-                floor.placed_rocks.retain(|&rock| rock != cell);
-                self.message("ゴブリンが置いた岩を取り除き、通路に戻しました。");
-                return Ok(());
-            }
             let unlocked = MONSTERS
                 .iter()
                 .filter(|monster| {
@@ -847,6 +893,7 @@ impl Game {
             Some(_) => return Err("設置物を撤去してから建設してください。"),
             None => None,
         };
+        let trap_level = self.next_trap_level(order);
         let (gold, loot) = if order == Order::Chest {
             if rarity > self.floor().rarity_limit() {
                 return Err("フロアを拡張すると、このレア度が解放されます。");
@@ -865,14 +912,16 @@ impl Game {
                 (gold, loot)
             }
         } else {
-            let site = order.site(rarity).ok_or("建設指示を選んでください。")?;
+            let site = order
+                .site(rarity, trap_level.unwrap_or(1))
+                .ok_or("建設指示を選んでください。")?;
             if site.is_monster() && self.floor().monster_count() >= self.floor().monster_limit() {
                 return Err("モンスターの配置上限です。");
             }
             if site.is_trap() && self.floor().trap_count() >= self.floor().trap_limit() {
                 return Err("罠の配置上限です。");
             }
-            (order.price(), order.loot())
+            (self.construction_price(order), order.loot())
         };
         if self.gold < gold || self.bones < order.bones() || self.loot < loot {
             return Err("金貨、骨材、または戦利品が足りません。");
@@ -883,13 +932,21 @@ impl Game {
         if order == Order::Chest && self.floor().chest_count() == 0 {
             self.countdown = PREPARE;
             if rarity == 0 && gold < Order::Chest.price() {
-                self.active().sites[cell.index()] = order.site(rarity);
+                self.active().sites[cell.index()] = order.site(rarity, trap_level.unwrap_or(1));
                 self.message("工務隊が金貨の不足分を補い、並品の宝箱を置きました。");
                 return Ok(());
             }
         }
-        self.active().sites[cell.index()] = order.site(rarity);
-        self.message(format!("ゴブリンが{}を配置しました。", order.name()));
+        self.active().sites[cell.index()] = order.site(rarity, trap_level.unwrap_or(1));
+        if let Some(level) = trap_level {
+            self.traps_built[usize::from(order == Order::Frost)] = level;
+            self.message(format!(
+                "ゴブリンが{} Lv.{level}を配置しました。",
+                order.name()
+            ));
+        } else {
+            self.message(format!("ゴブリンが{}を配置しました。", order.name()));
+        }
         Ok(())
     }
 
@@ -922,7 +979,7 @@ impl Game {
         } else if self.floors.len() >= MAX_FLOORS {
             Some("これ以上深いフロアは掘れません。")
         } else if self.boss_level() < self.descent_level() {
-            Some("玉座で冒険者を倒し、氷の主のレベルを上げてください。")
+            Some("玉座で冒険者を倒し、魔王のレベルを上げてください。")
         } else {
             None
         }
@@ -980,7 +1037,7 @@ impl Game {
         }
         self.bones -= 2;
         self.boss = (self.boss + 30).min(self.max_boss());
-        self.message("骨材2で氷の主を回復しました。");
+        self.message("骨材2で魔王を回復しました。");
         Ok(())
     }
 
@@ -1017,8 +1074,8 @@ impl Game {
         self.finish_raid();
         if let Some(report) = &self.last_report {
             self.message(format!(
-                "執事セヴラン：第{}波、撃退{}、逃走{}、玉座到達{}。",
-                report.wave, report.stopped, report.fled, report.throne
+                "執事セヴラン：第{}波、撃退{}、逃走{}、玉座到達{}、魔王経験値 +{}。",
+                report.wave, report.stopped, report.fled, report.throne, report.boss_xp
             ));
         }
     }
@@ -1251,10 +1308,18 @@ impl Game {
         let adventurer = &ADVENTURERS[invader.class as usize];
         if !invader.fought.contains(&cell) {
             match self.floor().site(cell) {
-                Some(Site::Spikes) => invader.hp -= SPIKE_DAMAGE - adventurer.trap_armor,
-                Some(Site::Frost) => {
-                    invader.hp -= FROST_DAMAGE - adventurer.trap_armor;
-                    invader.freeze = 2 - adventurer.resist;
+                Some(site) if site.is_trap() => {
+                    let level = site.trap_level().expect("trap level");
+                    let frost = site.order() == Order::Frost;
+                    let bonus = level as i32 - 1;
+                    let damage = if frost {
+                        invader.freeze =
+                            (2 + (bonus / 4).min(4) as u8).saturating_sub(adventurer.resist);
+                        FROST_DAMAGE + bonus * 2
+                    } else {
+                        SPIKE_DAMAGE + bonus * 3
+                    };
+                    invader.hp -= damage - adventurer.trap_armor;
                 }
                 Some(site) if site.monster().is_some_and(|(_, hp)| hp > 0) => {
                     invader.encounter = Some(Encounter {
@@ -1392,6 +1457,18 @@ impl Game {
                 game.boss = game.boss.checked_add(8 * (old_level - 1))?;
             }
         }
+        for site in game
+            .floors
+            .iter_mut()
+            .flat_map(|floor| floor.sites.iter_mut())
+            .flatten()
+        {
+            if let Site::Monster { id, hp } = site {
+                if let Some(monster) = MONSTERS.get(*id as usize) {
+                    *hp = (*hp).min(monster.hp);
+                }
+            }
+        }
         if game.development == missing_progress() {
             game.development = 0;
             if !game.valid() {
@@ -1425,6 +1502,7 @@ impl Game {
                 .any(|value| value > 1_000_000_000)
             || self.development > 100_000
             || self.boss_xp > MAX_BOSS_XP
+            || self.traps_built.iter().any(|&count| count > MAX_TRAP_LEVEL)
             || self.defeated != (self.boss == 0 && self.duel().is_none())
         {
             return false;
@@ -1455,6 +1533,9 @@ impl Game {
                         || cell == ENTRY
                         || cell == THRONE
                         || floor.route(ENTRY, cell).is_none()
+                        || site
+                            .trap_level()
+                            .is_some_and(|level| !(1..=MAX_TRAP_LEVEL).contains(&level))
                         || matches!(site, Site::Chest { rarity } if *rarity > floor.rarity_limit())
                         || matches!(site, Site::Monster { id, hp } if MONSTERS.get(*id as usize).is_none_or(|monster| *hp > monster.hp || monster.unlock > self.development))
                     {

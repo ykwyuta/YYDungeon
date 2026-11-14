@@ -203,7 +203,8 @@ const DUEL_BOSS: usize = 15;
 const ROCK_DIGGABLE: usize = 16;
 const ROCK_BUILT: usize = 17;
 const ROCK_SOLID: usize = 18;
-const SPRITES: [&[u8]; 19] = [
+const DEMON_KING: usize = 19;
+const SPRITES: [&[u8]; 20] = [
     include_bytes!("../assets/warden.png"),
     include_bytes!("../assets/sentinel.png"),
     include_bytes!("../assets/goblin.png"),
@@ -219,10 +220,11 @@ const SPRITES: [&[u8]; 19] = [
     include_bytes!("../assets/secretary.png"),
     include_bytes!("../assets/butler.png"),
     include_bytes!("../assets/throne-arena.jpg"),
-    include_bytes!("../assets/throne-boss-back.png"),
+    include_bytes!("../assets/demon-king-back.png"),
     include_bytes!("../assets/rock-diggable.png"),
     include_bytes!("../assets/rock-built.png"),
     include_bytes!("../assets/rock-solid.png"),
+    include_bytes!("../assets/demon-king.png"),
 ];
 
 type Sprite = (Bitmap, f32);
@@ -391,7 +393,8 @@ const RAID: Rect = Rect::new(868.0, 700.0, 328.0, 42.0);
 const TITLE_START: Rect = Rect::new(81.0, 433.0, 303.0, 55.0);
 #[cfg(target_arch = "wasm32")]
 const REFRESH_CACHE: Rect = Rect::new(470.0, 578.0, 302.0, 38.0);
-const TITLE_HELP: Rect = Rect::new(81.0, 503.0, 303.0, 43.0);
+const TITLE_NEW: Rect = Rect::new(81.0, 503.0, 303.0, 43.0);
+const TITLE_HELP: Rect = Rect::new(81.0, 560.0, 303.0, 43.0);
 
 #[derive(Clone, Copy)]
 pub(crate) enum Event {
@@ -626,6 +629,8 @@ impl Screen {
         if self.title {
             if TITLE_START.has(x, y) {
                 self.enter_workshop();
+            } else if self.has_save && TITLE_NEW.has(x, y) {
+                self.overlay = Some(Overlay::Reset);
             } else if TITLE_HELP.has(x, y) {
                 self.overlay = Some(Overlay::Help);
             }
@@ -678,7 +683,7 @@ impl Screen {
             if let Err(error) = self.game.heal() {
                 self.notify(error);
             }
-        } else if order_row(2).has(x, y) {
+        } else if order_row(1).has(x, y) {
             self.select_order(Order::Bestiary);
         } else if self.live() && !self.game.running() {
             if let Some(index) = (0..Order::ALL.len()).find(|&i| order_row(i).has(x, y)) {
@@ -755,9 +760,9 @@ impl Screen {
                     32 => self.game.paused = !self.game.paused,
                     37 => self.switch_floor(self.floor.saturating_sub(1)),
                     39 => self.switch_floor(self.floor + 1),
-                    51 => self.select_order(Order::Bestiary),
+                    50 | 51 => self.select_order(Order::Bestiary),
                     49..=56 if self.live() && !self.game.running() => {
-                        self.select_order(Order::ALL[(key - 49) as usize])
+                        self.select_order(Order::ALL[((key - 49) as usize).saturating_sub(1)])
                     }
                     _ => {}
                 },
@@ -875,11 +880,14 @@ impl View<'_> {
             if has_save {
                 "つづきから　 [Enter]"
             } else {
-                "はじめる　 [Enter]"
+                "はじめから　 [Enter]"
             },
             true,
             true,
         );
+        if has_save {
+            TITLE_NEW.button(g, "はじめから", false, true);
+        }
         TITLE_HELP.button(g, "遊び方　 [F1]", false, true);
         if let Some(overlay) = self.overlay {
             self.overlay(g, overlay);
@@ -1047,7 +1055,7 @@ impl View<'_> {
                     } else {
                         self.art.draw(
                             g,
-                            if self.live() { 0 } else { 1 },
+                            if self.live() { DEMON_KING } else { 0 },
                             rect.inset(2.0),
                             if self.live() || floor.steward {
                                 1.0
@@ -1088,8 +1096,8 @@ impl View<'_> {
                     } else {
                         let (sprite, ink) = match site {
                             Site::Chest { rarity } => (8, RARE[rarity as usize]),
-                            Site::Spikes => (9, RED),
-                            Site::Frost => (10, RARE[2]),
+                            Site::Spikes | Site::RankedTrap { frost: false, .. } => (9, RED),
+                            Site::Frost | Site::RankedTrap { frost: true, .. } => (10, RARE[2]),
                             _ => unreachable!(),
                         };
                         self.art.draw(g, sprite, rect.inset(3.0), 1.0);
@@ -1197,17 +1205,21 @@ impl View<'_> {
                             MONSTERS[id as usize].name, hp, MONSTERS[id as usize].hp
                         )
                     }
-                    Some(site) => site.order().name().into(),
+                    Some(site) => format!(
+                        "{}　Lv.{}",
+                        site.order().name(),
+                        site.trap_level().unwrap_or(1)
+                    ),
                     None if cell == ENTRY => "入口".into(),
                     None if cell == THRONE => if self.live() {
-                        "氷の主の玉座"
+                        "魔王の玉座"
                     } else {
-                        "中ボスの玉座"
+                        "中ボス・氷の主の玉座"
                     }
                     .into(),
                     None if floor.open(cell) => "通路".into(),
                     None => match Rock::at(floor, cell) {
-                        Rock::Built => "設置した岩壁　掘削で通路に戻す".into(),
+                        Rock::Built => "設置した岩壁　撤去で通路に戻す".into(),
                         Rock::Diggable if self.order == Order::Dig => {
                             let gain = floor.dig_development(cell).unwrap_or_default();
                             format!("掘削できる岩　迷宮開発 +{gain}")
@@ -1263,7 +1275,7 @@ impl View<'_> {
             TEXT,
         );
         for (i, mut order) in Order::ALL.into_iter().enumerate() {
-            if i == 2 && matches!(self.order, Order::Recruit(_)) {
+            if i == 1 && matches!(self.order, Order::Recruit(_)) {
                 order = self.order;
             }
             let rect = order_row(i);
@@ -1273,9 +1285,9 @@ impl View<'_> {
                 if selected { rgb(0x433626) } else { INSET },
                 if selected { GOLD } else { EDGE },
             );
-            let ink = if build || i == 2 { TEXT } else { DIM };
+            let ink = if build || i == 1 { TEXT } else { DIM };
             match i {
-                2 => {
+                1 => {
                     let id = if let Order::Recruit(id) = order {
                         id
                     } else {
@@ -1288,15 +1300,15 @@ impl View<'_> {
                         1.0,
                     );
                 }
-                0 | 1 | 3 | 4 => self.art.draw(
+                0 | 2 | 3 => self.art.draw(
                     g,
-                    [8, 2, 1, 9, 10][i],
+                    [8, 0, 9, 10][i],
                     Rect::new(rect.x + 6.0, rect.y + 2.0, 29.0, 26.0),
                     if build { 1.0 } else { 0.55 },
                 ),
-                5 | 7 => self.art.draw(
+                4 | 6 => self.art.draw(
                     g,
-                    if i == 5 { ROCK_DIGGABLE } else { ROCK_BUILT },
+                    if i == 4 { ROCK_DIGGABLE } else { ROCK_BUILT },
                     Rect::new(rect.x + 6.0, rect.y + 2.0, 29.0, 26.0),
                     if build { 1.0 } else { 0.55 },
                 ),
@@ -1307,21 +1319,18 @@ impl View<'_> {
                     GOLD,
                 ),
             }
-            Rect::new(rect.x + 41.0, rect.y + 5.0, 149.0, 22.0).label(
-                g,
-                order.name(),
-                Font::Normal,
-                ink,
+            let name = self.game.next_trap_level(order).map_or_else(
+                || order.name().into(),
+                |level| format!("{} Lv.{level}", order.name()),
             );
+            Rect::new(rect.x + 41.0, rect.y + 5.0, 149.0, 22.0).label(g, &name, Font::Normal, ink);
             let (price, loot) = if order == Order::Chest {
                 self.game.chest_cost(self.rarity)
             } else {
-                (order.price(), order.loot())
+                (self.game.construction_price(order), order.loot())
             };
             let cost = if order == Order::Bestiary {
                 format!("開発 {}", self.game.development)
-            } else if order == Order::Remove {
-                "費用なし".into()
             } else if matches!(order, Order::Recruit(_)) {
                 format!("{}金 {}骨 {}品", price, order.bones(), loot)
             } else if loot > 0 {
@@ -1339,7 +1348,7 @@ impl View<'_> {
             );
             Rect::new(rect.x + 305.0, rect.y + 7.0, 20.0, 18.0).label(
                 g,
-                &(i + 1).to_string(),
+                &(if i == 0 { 1 } else { i + 2 }).to_string(),
                 Font::Small,
                 DIM,
             );
@@ -1352,7 +1361,7 @@ impl View<'_> {
         if self.live() {
             Rect::new(868.0, 611.0, 328.0, 23.0).label(
                 g,
-                &format!("氷の主　HP {} / {}", self.game.boss, self.game.max_boss()),
+                &format!("魔王　HP {} / {}", self.game.boss, self.game.max_boss()),
                 Font::Normal,
                 TEXT,
             );
@@ -1387,7 +1396,7 @@ impl View<'_> {
         } else {
             Rect::new(868.0, 611.0, 328.0, 40.0).label(
                 g,
-                &format!("中ボス　　Lv.{}以上は素通し", floor.pass_level()),
+                &format!("中ボス・氷の主　Lv.{}以上は通過", floor.pass_level()),
                 Font::Normal,
                 GOLD,
             );
@@ -1428,10 +1437,11 @@ impl View<'_> {
         Rect::new(277.0, 668.0, 536.0, 22.0).label(
             g,
             &format!(
-                "規模 {}/3　撃退 {}　氷の主 Lv.{} ({xp}/{next_xp} XP)　次の階 Lv.{}",
+                "規模 {}/3　撃退 {}　魔王 Lv.{}　次Lvまで {} XP　次の階 Lv.{}",
                 floor.tier,
                 floor.earned(),
                 self.game.boss_level(),
+                next_xp - xp,
                 self.game.descent_level(),
             ),
             Font::Small,
@@ -1476,7 +1486,7 @@ impl View<'_> {
                     .filter(|monster| monster.floor > self.game.floors.len())
                     .map(|monster| monster.floor)
                     .min()
-                    .map(|floor| format!("次のランクは地下{floor}階"))
+                    .map(|floor| format!("次の仲間は地下{floor}階"))
             })
             .unwrap_or_else(|| "全種解放".into());
         Rect::new(161.0, 155.0, 915.0, 27.0).label(
@@ -1585,7 +1595,7 @@ impl View<'_> {
             (
                 829.0,
                 462.0,
-                format!("氷の主　Lv.{level}"),
+                format!("魔王　Lv.{level}"),
                 boss_hp,
                 self.game.max_boss(),
                 duel.boss_mp,
@@ -1619,6 +1629,13 @@ impl View<'_> {
                 TEXT,
             );
         }
+        let (xp, next_xp) = self.game.boss_experience();
+        Rect::new(851.0, 570.0, 302.0, 22.0).label(
+            g,
+            &format!("次のレベルまで {} XP", next_xp - xp),
+            Font::Normal,
+            GOLD,
+        );
         Rect::new(25.0, 599.0, 824.0, 152.0).panel(g, INSET, GOLD);
         Rect::new(48.0, 611.0, 750.0, 24.0).label(
             g,
@@ -1643,6 +1660,17 @@ impl View<'_> {
         if animation.is_some() {
             Rect::new(880.0, 642.0, 320.0, 44.0).label(g, "攻防中", Font::NormalCenter, GOLD);
         } else if duel.outcome.is_some() {
+            let xp = if duel.outcome == Some(crate::duel::Outcome::Victory) {
+                self.game.boss_experience_reward(duel.level)
+            } else {
+                0
+            };
+            Rect::new(880.0, 615.0, 320.0, 31.0).label(
+                g,
+                &format!("獲得経験値 +{xp} XP"),
+                Font::NormalCenter,
+                GOLD,
+            );
             DUEL_NEXT.button(g, "次へ　[Enter]", true, true);
         } else {
             for (index, command) in Command::ALL.into_iter().enumerate() {
@@ -1684,16 +1712,20 @@ impl View<'_> {
         );
         if secretary {
             let (count, level) = self.game.forecast();
+            let (xp, next_xp) = self.game.boss_experience();
             let (first, second) = if self.game.running() {
-                (
-                    "襲撃中です。冒険者が玉座に着いたら、氷の主に戦いの指示を出してください。"
-                        .into(),
-                    "氷の主のMPは同じ襲撃の戦いに持ち越します。防御でもMPを回復できます。".into(),
-                )
+                ("玉座で魔王さまが勝つと経験値が入ります。防御でMPを回復し、次の戦いに備えましょう。".into(),
+                 format!("現在Lv.{}、次のレベルまで{} XPです。", self.game.boss_level(), next_xp - xp))
             } else if count == 0 {
-                ("空いている通路に宝箱を置きましょう。最初は宝箱をひとつ置くと、少人数で迎えられます。".into(), "宝箱を調べると予想経路が見えます。金貨が足りなければ、最初の並品の宝箱は工務隊が補助します。".into())
+                ("空き通路に宝箱を置くと襲撃が再開します。箱が多いほど人数が増え、レアな品は報酬を増やします。".into(),
+                 "冒険者の強さは襲撃の波数で上がります。次は玉座まで少し通して魔王さまを育てましょう。".into())
             } else {
-                (format!("次は{count}人、最大Lv.{level}です。氷の主を育てるため、玉座まで来られる経路を残しましょう。"), format!("次の階は氷の主がLv.{}になると開きます。階を進み、迷宮を掘ると新しい仲間が加わります。", self.game.descent_level()))
+                (format!("次は{count}人、最大Lv.{level}です。罠を設置するほど次の罠は強くなり、費用も上がります。"),
+                 if self.game.can_descend() {
+                     "次の階を掘れます。上層を氷の主に任せて、到達階と迷宮開発で仲間を増やしましょう。".into()
+                 } else {
+                     format!("魔王さまはLv.{}。次の階はLv.{}で開きます。仲間を増やすには掘削も進めましょう。", self.game.boss_level(), self.game.descent_level())
+                 })
             };
             Rect::new(548.0, 290.0, 375.0, 75.0).label(g, &first, Font::Normal, TEXT);
             Rect::new(548.0, 380.0, 375.0, 92.0).label(g, &second, Font::Normal, TEXT);
@@ -1708,7 +1740,10 @@ impl View<'_> {
                     "回収　金貨 {}　骨材 {}　戦利品 {}",
                     report.gold, report.bones, report.loot
                 ),
-                format!("開けられた宝箱 {}個", report.chests),
+                format!(
+                    "消失した宝箱 {}個　魔王 +{} XP",
+                    report.chests, report.boss_xp
+                ),
             ]
             .into_iter()
             .enumerate()
@@ -1723,7 +1758,7 @@ impl View<'_> {
         } else {
             Rect::new(548.0, 290.0, 375.0, 75.0).label(
                 g,
-                "襲撃が終わり次第、戦果と回収した資材をご報告します。",
+                "襲撃後に戦果と回収した資材、魔王さまが玉座戦で得た経験値をご報告します。",
                 Font::Normal,
                 TEXT,
             );
@@ -1745,10 +1780,10 @@ impl View<'_> {
             Rect::new(283.0, 144.0, 674.0, 492.0).panel(g, PANEL, GOLD);
             Rect::new(304.0, 167.0, 632.0, 51.0).label(g, "迷宮工房の遊び方", Font::TitleMid, TEXT);
             for (i, (title, detail)) in [
-                ("建設", "右の指示を選び、迷路の区画を押すとゴブリンが作業します。分岐や回り道を掘ると、図鑑から新しい魔物を配置できます。"),
+                ("建設", "右の指示で建設します。岩壁や設置物の撤去は金貨8です。罠は設置するほど強くなり、次の費用も上がります。"),
                 ("おびき寄せる", "宝箱が多いほど冒険者が増えます。強さは襲撃のたびに上がり、レアな品は撃退報酬を増やします。開けられた箱は消えます。"),
-                ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨と資材を回収します。HPは魔物が青緑、冒険者が赤です。玉座ではターン制で戦い、氷の主が倒れると陥落します。"),
-                ("拡張と委任", "撃退で迷路と配置枠が広がります。玉座で勝って氷の主を育てると次の階へ進めます。前の階は中ボスに任せられます。"),
+                ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨と資材を回収します。HPは魔物が青緑、冒険者が赤です。玉座ではターン制で戦い、魔王が倒れると陥落します。"),
+                ("拡張と委任", "撃退で迷路と配置枠が広がります。玉座で勝って魔王を育てると次の階へ進めます。前の階は中ボスに任せられます。"),
             ].into_iter().enumerate() {
                 let y = 236.0 + 78.0 * i as f32;
                 Rect::new(308.0, y, 617.0, 22.0).label(g, title, Font::Normal, GOLD);
@@ -1764,9 +1799,9 @@ impl View<'_> {
         }
         Rect::new(283.0, 258.0, 674.0, 268.0).panel(g, PANEL, GOLD);
         let (title, detail) = match overlay {
-            Overlay::Descend => ("新しいフロア", format!("氷の主が必要なレベルに達しました。地下{}階を掘ります。前の階を任せると中ボスが迎撃し、Lv.{}以上の冒険者は次の階へ通します。", self.game.floors.len() + 1, self.floor().pass_level())),
+            Overlay::Descend => ("新しいフロア", format!("魔王が必要なレベルに達しました。地下{}階を掘ります。前の階を任せると氷の主が迎撃し、Lv.{}以上の冒険者は次の階へ通します。", self.game.floors.len() + 1, self.floor().pass_level())),
             Overlay::Reset => ("最初から始める", "現在の迷宮と進行記録を消去して、地下1階から始めます。".into()),
-            Overlay::Defeat => ("迷宮陥落", format!("氷の主が倒されました。第{}波・累計撃退{}人・地下{}階", self.game.wave, self.game.kills, self.game.floors.len())),
+            Overlay::Defeat => ("迷宮陥落", format!("魔王が倒されました。第{}波・累計撃退{}人・地下{}階", self.game.wave, self.game.kills, self.game.floors.len())),
             Overlay::Help | Overlay::Bestiary(_) | Overlay::Secretary | Overlay::Butler => unreachable!(),
         };
         Rect::new(306.0, 286.0, 628.0, 52.0).label(
