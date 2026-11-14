@@ -35,7 +35,7 @@ wasm.yy_frame(0.25, 1);
 assert.ok(labels.has("はじめる　 [Enter]"));
 assert.equal(wasm.yy_can_autosave(), 0);
 assert.equal(game().countdown, 42);
-assert.equal(sprites, 59);
+assert.equal(sprites, 63);
 wasm.yy_event(2, 112, 0);
 wasm.yy_frame(0, 1);
 assert.ok(labels.has("キャッシュを消して再読み込み"));
@@ -81,6 +81,14 @@ for (let i = 0; i < 200 && game().raid; i++) {
   }
 }
 assert.ok(fightFrames >= 5);
+assert.ok(labels.has("執事 セヴラン"));
+wasm.yy_event(2, 27, 0);
+wasm.yy_frame(0, 1);
+wasm.yy_event(1, 928, 48);
+wasm.yy_frame(0, 1);
+assert.ok(labels.has("魔族の秘書 レイラ"));
+wasm.yy_event(2, 27, 0);
+wasm.yy_frame(0, 1);
 const played = game();
 assert.equal(played.raid, null);
 assert.equal(played.kills, 3);
@@ -123,3 +131,28 @@ wasm.yy_event(1, 244, 261);
 wasm.yy_frame(0, 1);
 assert.equal(game().floors[0].placed_rocks.length, 0);
 assert.equal(game().development, developmentBefore);
+
+// Resume a saved throne fight, choose a spell, and return to the raid.
+const arenaGame = game();
+arenaGame.wave = 2;
+arenaGame.raid = {
+  tally: { wave: 2, stopped: 0, fled: 0, throne: 1, gold: 0, bones: 0, loot: 0, chests: 0 },
+  duel: { class: 7, level: 4, hp: 15, max_hp: 62, mp: 6, max_mp: 6, boss_mp: 9, turn: 0, lines: [], outcome: null },
+  waiting: [], invaders: [], clock: 0, spawn: 0, fallen: [],
+};
+const arenaSave = new TextEncoder().encode(JSON.stringify([1, arenaGame]));
+const arenaPtr = wasm.yy_load_buffer(arenaSave.length);
+new Uint8Array(wasm.memory.buffer, arenaPtr, arenaSave.length).set(arenaSave);
+wasm.yy_init(1240, 780);
+wasm.yy_event(2, 13, 0);
+wasm.yy_frame(0, 1);
+assert.ok(labels.has("玉座の戦い"));
+wasm.yy_event(2, 50, 0);
+wasm.yy_frame(0, 1);
+assert.equal(game().raid.duel.outcome, "Victory");
+assert.equal(game().raid.duel.boss_mp, 6);
+wasm.yy_event(2, 13, 0);
+wasm.yy_frame(0.25, 1);
+wasm.yy_frame(0.25, 1);
+assert.equal(game().last_report.stopped, 1);
+assert.equal(game().last_report.throne, 1);

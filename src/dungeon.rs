@@ -1,4 +1,5 @@
 use crate::adventurers::{raid_class, ADVENTURERS};
+use crate::duel::{Command, Duel, Outcome};
 use crate::monsters::{Monster, Tactic, GOBLIN, MONSTERS, SENTINEL};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
@@ -514,11 +515,27 @@ impl Invader {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Raid {
+    #[serde(default)]
+    tally: Report,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    duel: Option<Duel>,
     waiting: VecDeque<(u8, u8)>,
     pub invaders: Vec<Invader>,
     clock: f32,
     spawn: u32,
     fallen: Vec<Cell>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Report {
+    pub wave: u32,
+    pub stopped: u32,
+    pub fled: u32,
+    pub throne: u32,
+    pub gold: u32,
+    pub bones: u32,
+    pub loot: u32,
+    pub chests: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -536,6 +553,8 @@ pub struct Game {
     pub paused: bool,
     pub log: Vec<String>,
     pub defeated: bool,
+    #[serde(default)]
+    pub last_report: Option<Report>,
     raid: Option<Raid>,
 }
 
@@ -561,8 +580,9 @@ impl Game {
             boss: 110,
             countdown: PREPARE,
             paused: false,
-            log: vec!["親方、宝箱に釣られた冒険者が来ます。通り道を守りましょう。".into()],
+            log: vec!["秘書レイラ：宝箱までの予想経路を確認し、分岐の手前を守りましょう。".into()],
             defeated: false,
+            last_report: None,
             raid: None,
         }
     }
@@ -577,6 +597,53 @@ impl Game {
 
     pub fn max_boss(&self) -> u32 {
         110 + 20 * (self.floors.len() - 1) as u32 + 12 * (self.floor().tier - 1) as u32
+    }
+
+    pub fn boss_level(&self) -> u32 {
+        1 + 2 * (self.floors.len() as u32 - 1) + u32::from(self.floor().tier - 1)
+    }
+
+    pub fn duel(&self) -> Option<&Duel> {
+        self.raid.as_ref()?.duel.as_ref()
+    }
+
+    pub fn duel_command(&mut self, command: Command) {
+        let level = self.boss_level();
+        if let Some(duel) = self.raid.as_mut().and_then(|raid| raid.duel.as_mut()) {
+            duel.act(command, level, &mut self.boss, self.wave);
+        }
+    }
+
+    pub fn dismiss_duel(&mut self) {
+        let Some(outcome) = self.duel().and_then(|duel| duel.outcome) else {
+            return;
+        };
+        let Some(mut raid) = self.raid.take() else {
+            return;
+        };
+        let duel = raid.duel.take().expect("finished duel");
+        match outcome {
+            Outcome::Victory => self.raid_reward(
+                &mut raid.tally,
+                duel.level,
+                self.floors.len() - 1,
+                duel.class,
+            ),
+            Outcome::Fled => {
+                raid.tally.fled += 1;
+                self.message(format!(
+                    "{}は玉座から逃走しました。",
+                    ADVENTURERS[duel.class as usize].name
+                ));
+            }
+            Outcome::Defeat => {
+                self.defeated = true;
+                self.last_report = Some(raid.tally);
+                self.message("氷の主が倒れ、迷宮は陥落しました。");
+                return;
+            }
+        }
+        self.raid = Some(raid);
     }
 
     pub fn running(&self) -> bool {
@@ -844,6 +911,26 @@ impl Game {
         ));
     }
 
+    fn raid_reward(&mut self, tally: &mut Report, level: u8, depth: usize, class: u8) {
+        let before = (self.gold, self.bones, self.loot);
+        self.reward(level, depth, class);
+        tally.stopped += 1;
+        tally.gold += self.gold - before.0;
+        tally.bones += self.bones - before.1;
+        tally.loot += self.loot - before.2;
+    }
+
+    fn complete_raid(&mut self, tally: Report) {
+        self.last_report = Some(tally);
+        self.finish_raid();
+        if let Some(report) = &self.last_report {
+            self.message(format!(
+                "執事セヴラン：第{}波、撃退{}、逃走{}、玉座到達{}。",
+                report.wave, report.stopped, report.fled, report.throne
+            ));
+        }
+    }
+
     fn finish_raid(&mut self) {
         if self.defeated {
             return;
@@ -876,6 +963,10 @@ impl Game {
         self.paused = false;
         self.countdown = 0.0;
         let mut waiting = VecDeque::new();
+        let mut tally = Report {
+            wave: self.wave,
+            ..Report::default()
+        };
         let mut budgets: Vec<u32> = self
             .floors
             .iter()
@@ -913,7 +1004,7 @@ impl Game {
                 let cost = 7 + 4 * level as u32 + ADVENTURERS[class as usize].bounty;
                 if *budget >= cost {
                     *budget -= cost;
-                    self.reward(level, depth, class);
+                    self.raid_reward(&mut tally, level, depth, class);
                     stopped += 1;
                     captured = true;
                     break;
@@ -940,6 +1031,8 @@ impl Game {
             }
         }
         let mut raid = Raid {
+            tally,
+            duel: None,
             waiting,
             invaders: Vec::new(),
             clock: 0.0,
@@ -947,7 +1040,7 @@ impl Game {
             fallen: Vec::new(),
         };
         if raid.waiting.is_empty() {
-            self.finish_raid();
+            self.complete_raid(raid.tally);
         } else {
             self.spawn(&mut raid);
             self.raid = Some(raid);
@@ -1105,28 +1198,11 @@ impl Game {
             invader.step = 0;
             return true;
         }
-        if cell == THRONE && (invader.chest.is_none() || invader.looted) {
-            let damage = 4
-                + 4 * invader.level as u32
-                + invader.hp as u32 / 3
-                + u32::from(adventurer.retaliation);
-            self.boss = self.boss.saturating_sub(damage);
-            self.defeated = self.boss == 0;
-            if self.defeated {
-                self.message("氷の主が倒れ、迷宮は陥落しました。");
-            } else {
-                self.message(format!(
-                    "Lv.{} {}が玉座に到達。氷の主に{}ダメージ。",
-                    invader.level, adventurer.name, damage
-                ));
-            }
-            return false;
-        }
         true
     }
 
     pub fn tick(&mut self, dt: f32) {
-        if self.paused || self.defeated || !dt.is_finite() {
+        if self.paused || self.defeated || self.duel().is_some() || !dt.is_finite() {
             return;
         }
         let dt = dt.clamp(0.0, 0.25);
@@ -1148,24 +1224,44 @@ impl Game {
                 self.spawn(&mut raid);
             }
             let mut survivors = Vec::new();
-            for mut invader in std::mem::take(&mut raid.invaders) {
+            let mut invaders = std::mem::take(&mut raid.invaders).into_iter();
+            for mut invader in invaders.by_ref() {
+                let was_looted = invader.looted;
                 if self.move_invader(&mut invader) {
+                    if invader.looted && !was_looted {
+                        raid.tally.chests += 1;
+                    }
+                    if invader.cell == THRONE && (invader.chest.is_none() || invader.looted) {
+                        raid.tally.throne += 1;
+                        raid.duel = Some(Duel::new(
+                            invader.class,
+                            invader.level,
+                            invader.hp as u32,
+                            invader.max_hp as u32,
+                            self.boss_level(),
+                        ));
+                        break;
+                    }
                     survivors.push(invader);
-                } else if self.defeated {
-                    break;
                 } else if invader.hp <= 0 {
                     if raid.fallen.len() < RAID_MAX {
                         raid.fallen.push(invader.cell);
                     }
-                    self.reward(invader.level, self.floors.len() - 1, invader.class);
+                    self.raid_reward(
+                        &mut raid.tally,
+                        invader.level,
+                        self.floors.len() - 1,
+                        invader.class,
+                    );
                 }
             }
+            survivors.extend(invaders);
             raid.invaders = survivors;
-            if self.defeated {
-                return;
+            if raid.duel.is_some() {
+                break;
             }
             if raid.invaders.is_empty() && raid.waiting.is_empty() {
-                self.finish_raid();
+                self.complete_raid(raid.tally);
                 return;
             }
         }
@@ -1202,6 +1298,11 @@ impl Game {
         if version != 1 || !game.valid() {
             return None;
         }
+        if let Some(raid) = &mut game.raid {
+            if raid.tally.wave == 0 {
+                raid.tally.wave = game.wave;
+            }
+        }
         Some(game)
     }
 
@@ -1214,7 +1315,7 @@ impl Game {
                 .into_iter()
                 .any(|value| value > 1_000_000_000)
             || self.development > 100_000
-            || self.defeated != (self.boss == 0)
+            || self.defeated != (self.boss == 0 && self.duel().is_none())
         {
             return false;
         }
@@ -1260,6 +1361,10 @@ impl Game {
             (1..=15).contains(&level) && (class as usize) < ADVENTURERS.len()
         };
         !self.defeated
+            && raid
+                .duel
+                .as_ref()
+                .is_none_or(|duel| duel.valid(self.boss_level(), self.boss))
             && raid.waiting.len() + raid.invaders.len() <= RAID_MAX
             && (0.0..STEP).contains(&raid.clock)
             && raid.spawn < 1000

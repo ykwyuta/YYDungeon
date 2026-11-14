@@ -5,7 +5,20 @@ fn settle(game: &mut Game) {
         if !game.running() {
             return;
         }
-        game.tick(0.25);
+        if let Some(duel) = game.duel() {
+            if duel.outcome.is_some() {
+                game.dismiss_duel();
+            } else {
+                let level = game.boss_level();
+                let command = [Command::Storm, Command::Frost, Command::Claw]
+                    .into_iter()
+                    .find(|&command| duel.available(command, level))
+                    .unwrap();
+                game.duel_command(command);
+            }
+        } else {
+            game.tick(0.25);
+        }
     }
     panic!("raid did not settle");
 }
@@ -330,10 +343,12 @@ fn opening_the_last_chest_stops_new_raids_until_it_is_replaced() {
     let mut game = Game::load(&game.save()).unwrap();
     settle(&mut game);
     assert!(!game.defeated);
-    assert_eq!(game.kills, 0);
-    assert_eq!(game.bones, 0);
-    assert_eq!(game.loot, 0);
-    assert_eq!(game.gold, 170 + RAID_RECOVERY_GOLD);
+    let report = game.last_report.as_ref().unwrap();
+    assert_eq!(report.stopped + report.fled, 3);
+    assert_eq!(report.throne, 3);
+    assert_eq!(report.chests, 1);
+    assert_eq!(game.kills, report.stopped);
+    assert_eq!(game.gold, 170 + RAID_RECOVERY_GOLD + report.gold);
     game.begin_raid();
     for _ in 0..(PREPARE * 4.0) as usize + 4 {
         game.tick(0.25);
@@ -468,4 +483,54 @@ fn new_floor_requires_its_own_development_and_resets_raid_pressure() {
     assert!(game.descend(false).unwrap_err().contains("開発24"));
     develop_current_floor(&mut game);
     assert!(game.can_descend());
+}
+
+#[test]
+fn throne_duels_pause_the_maze_and_resume_after_a_saved_turn() {
+    let mut game = Game::new();
+    game.active().sites.iter_mut().for_each(|site| {
+        if !matches!(site, Some(Site::Chest { .. })) {
+            *site = None;
+        }
+    });
+    game.begin_raid();
+    for _ in 0..200 {
+        game.tick(0.25);
+        if game.duel().is_some() {
+            break;
+        }
+    }
+    assert!(game.duel().is_some());
+    let before = game.save();
+    game.tick(0.25);
+    assert_eq!(before, game.save());
+    game.duel_command(Command::Storm);
+    assert_eq!(before, game.save(), "storm is locked at boss level one");
+    game.duel_command(Command::Guard);
+    assert_eq!(game.duel().unwrap().turn, 1);
+    let bytes = game.save();
+    let mut restored = Game::load(&bytes).unwrap();
+    assert_eq!(restored.save(), bytes);
+    settle(&mut restored);
+    let report = restored.last_report.as_ref().unwrap();
+    assert_eq!(report.throne, 3);
+    assert_eq!(report.stopped + report.fled, 3);
+}
+
+#[test]
+fn advanced_duelists_use_stronger_magic_and_injured_adventurers_can_flee() {
+    let mut hp = 110;
+    let mut duel = Duel::new(11, 7, 100, 100, 4);
+    duel.act(Command::Storm, 4, &mut hp, 1);
+    assert_eq!(duel.hp, 56);
+    assert_eq!(duel.mp, 4);
+    assert!(duel.lines.iter().any(|line| line.contains("光雷の魔法")));
+    assert!(hp < 110);
+
+    let escaped = (1..=32).any(|wave| {
+        let mut duel = Duel::new(1, 1, 2, 40, 1);
+        duel.act(Command::Guard, 1, &mut 110, wave);
+        duel.outcome == Some(Outcome::Fled)
+    });
+    assert!(escaped);
 }

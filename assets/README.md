@@ -64,3 +64,23 @@ Game asset production: precisely aligned 3 columns x 2 rows sprite atlas on genu
 ## ゴブリン守備兵
 
 Create one isolated full-body goblin dungeon guard sprite for YYDungeon, a Japanese retro fantasy strategy game. A squat unmistakably non-human moss-green goblin with enormous pointed ears, broad nose, two little lower tusks and a scrappy alert expression. He is crouched ready to defend a stone passage, holding a broad beaten-iron round shield with worn burgundy paint and a short knotted wooden cudgel. Worn charcoal leather armor, a small muted red shoulder sash, and rough boots. Bold rounded goblin silhouette, compact limbs, expressive character, three-quarter elevated view facing forward and to the left. Hand-painted painterly medieval game sprite with matte materials, warm amber edge light and cool slate shadows. It must still read at 28 pixels: emphasize the green face and the round shield, avoid fine clutter. Whole figure and both items fit well inside the image, centered and surrounded by completely transparent alpha. No background, no drop shadow, no ground, no text, no lettering, no other figures.
+
+## 秘書・執事と玉座の戦い
+
+レイラ・セヴランの立ち絵と玉座の戦闘背景は組み込み ImageGen で生成しました。
+
+### secretary
+
+Isolated waist-up portrait sprite, transparent alpha, for Japanese dark fantasy strategy game YYDungeon. Adult female demon secretary, lavender skin, short ivory horns, dark violet bob haircut, composed friendly expression, charcoal high-collar office jacket with antique brass trim; holding an open dungeon blueprint ledger. Painterly classic JRPG portrait, warm amber rim light with cool slate shadows; distinguished elegant silhouette, no writing, no backdrop, no ground or shadow.
+
+### butler
+
+Isolated waist-up portrait sprite, transparent alpha, for Japanese dark fantasy strategy game YYDungeon. Elderly male demon butler, ash-blue skin, swept silver hair, small black ram horns, dignified wry look, fitted black tailcoat with a bronze chain, holding a closed burgundy report ledger. Painterly classic JRPG portrait, warm amber rim light, cool slate shadows, bold silhouette, no text, no backdrop.
+
+### arena
+
+Wide 2.1:1 raster background for retro Japanese fantasy RPG boss battle in an underground frost throne hall. Elegant hand-painted game environment, dark blue slate brick, ice shards and narrow amber braziers at the far left and right edges, icy throne in the distant middle, wide empty stone floor for two character sprites placed on left and right. Head-on view with slight overhead perspective. Atmospheric but low contrast in the foreground and no characters, no UI, no text or logos.
+
+### 玉座の氷の主
+
+One isolated full-body combat sprite for YYDungeon, true transparent background, a powerful frost demon dungeon boss made of slate blue ice, with swept horns, angular crystalline shoulders, icy white eyes and bulky arms, three-quarter view facing right toward an enemy. Wide grounded fighting stance, hands open, painted RPG monster sprite with deep navy shadows and luminous cyan crystal edges. Crisp readable silhouette, entire body visible, no floor, no external shadows, no backdrop, no lettering. Original hand-painted Japanese fantasy game battle art.

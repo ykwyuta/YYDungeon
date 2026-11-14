@@ -1,4 +1,5 @@
 use crate::adventurers::{strongest_class, ADVENTURERS, ADVENTURER_ART};
+use crate::duel::{boss_mp, Command, Duel};
 use crate::dungeon::{Cell, Floor, Game, Order, Site, ENTRY, RARITIES, THRONE};
 use crate::dungeon::{FLOOR_BONE_COST, FLOOR_DEVELOPMENT_GOAL, FLOOR_GOLD_COST};
 use crate::gfx::{Bitmap, Font, Gfx};
@@ -149,7 +150,11 @@ impl Grid {
     }
 }
 
-const SPRITES: [&[u8]; 12] = [
+const SECRETARY: usize = 12;
+const BUTLER: usize = 13;
+const ARENA: usize = 14;
+const DUEL_BOSS: usize = 15;
+const SPRITES: [&[u8]; 16] = [
     include_bytes!("../assets/warden.png"),
     include_bytes!("../assets/sentinel.png"),
     include_bytes!("../assets/goblin.png"),
@@ -162,6 +167,10 @@ const SPRITES: [&[u8]; 12] = [
     include_bytes!("../assets/spikes.png"),
     include_bytes!("../assets/frost.png"),
     include_bytes!("../assets/title.jpg"),
+    include_bytes!("../assets/secretary.png"),
+    include_bytes!("../assets/butler.png"),
+    include_bytes!("../assets/throne-arena.jpg"),
+    include_bytes!("../assets/throne-boss.png"),
 ];
 
 struct Art {
@@ -251,6 +260,19 @@ fn next_unlock(development: u32) -> Option<u32> {
         .min()
 }
 
+const ADVICE: Rect = Rect::new(867.0, 27.0, 116.0, 40.0);
+const REPORT: Rect = Rect::new(989.0, 27.0, 122.0, 40.0);
+const COURT_CLOSE: Rect = Rect::new(759.0, 520.0, 175.0, 44.0);
+const DUEL_NEXT: Rect = Rect::new(891.0, 671.0, 275.0, 62.0);
+fn duel_button(index: usize) -> Rect {
+    Rect::new(
+        880.0 + (index % 2) as f32 * 151.0,
+        617.0 + (index / 2) as f32 * 57.0,
+        144.0,
+        49.0,
+    )
+}
+
 const HELP: Rect = Rect::new(1118.0, 27.0, 96.0, 40.0);
 const PREVIOUS: Rect = Rect::new(30.0, 124.0, 39.0, 39.0);
 const NEXT: Rect = Rect::new(74.0, 124.0, 39.0, 39.0);
@@ -274,6 +296,8 @@ pub(crate) enum Event {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Overlay {
     Help,
+    Secretary,
+    Butler,
     Bestiary(usize),
     Descend,
     Defeat,
@@ -403,6 +427,12 @@ impl Screen {
     }
 
     fn overlay_click(&mut self, overlay: Overlay, x: f32, y: f32) {
+        if matches!(overlay, Overlay::Secretary | Overlay::Butler) {
+            if COURT_CLOSE.has(x, y) {
+                self.overlay = None;
+            }
+            return;
+        }
         if let Overlay::Bestiary(page) = overlay {
             if BESTIARY_CLOSE.has(x, y) {
                 self.overlay = None;
@@ -473,7 +503,21 @@ impl Screen {
             }
             return;
         }
-        if HELP.has(x, y) {
+        if let Some(duel) = self.game.duel() {
+            if duel.outcome.is_some() {
+                if DUEL_NEXT.has(x, y) {
+                    self.game.dismiss_duel();
+                }
+            } else if let Some(index) = (0..4).find(|&index| duel_button(index).has(x, y)) {
+                self.game.duel_command(Command::ALL[index]);
+            }
+            return;
+        }
+        if ADVICE.has(x, y) {
+            self.overlay = Some(Overlay::Secretary);
+        } else if REPORT.has(x, y) {
+            self.overlay = Some(Overlay::Butler);
+        } else if HELP.has(x, y) {
             self.overlay = Some(Overlay::Help);
         } else if PREVIOUS.has(x, y) {
             self.switch_floor(self.floor.saturating_sub(1));
@@ -530,6 +574,7 @@ impl Screen {
     }
 
     pub fn frame(&mut self, events: &[Event], dt: f32, focused: bool) {
+        let report_wave = self.game.last_report.as_ref().map(|report| report.wave);
         for &event in events {
             match event {
                 Event::Resize(w, h) => self.gfx.resize(w, h),
@@ -540,6 +585,19 @@ impl Screen {
                 Event::Click(x, y) => {
                     let (x, y) = self.point(x, y);
                     self.click(x, y);
+                }
+                Event::Key(key)
+                    if !self.title
+                        && self.overlay.is_none()
+                        && self.game.duel().is_some()
+                        && key != 122 =>
+                {
+                    let duel = self.game.duel().unwrap();
+                    if duel.outcome.is_some() && (key == 13 || key == 32) {
+                        self.game.dismiss_duel();
+                    } else if (49..=52).contains(&key) {
+                        self.game.duel_command(Command::ALL[(key - 49) as usize]);
+                    }
                 }
                 Event::Key(112) => self.overlay = Some(Overlay::Help),
                 Event::Key(122) => self.gfx.toggle_fullscreen(),
@@ -567,8 +625,12 @@ impl Screen {
         if !self.title && self.overlay.is_none() && focused {
             self.game.tick(dt);
         }
-        if !self.title && self.game.defeated && self.overlay.is_none() {
-            self.overlay = Some(Overlay::Defeat);
+        if !self.title && self.overlay.is_none() {
+            if self.game.defeated {
+                self.overlay = Some(Overlay::Defeat);
+            } else if self.game.last_report.as_ref().map(|report| report.wave) != report_wave {
+                self.overlay = Some(Overlay::Butler);
+            }
         }
         if let Some((_, t)) = &mut self.notice {
             *t -= dt;
@@ -607,6 +669,8 @@ impl Screen {
             };
             if self.title {
                 view.draw_title(&mut self.gfx, self.has_save);
+            } else if let Some(duel) = self.game.duel() {
+                view.draw_duel(&mut self.gfx, duel);
             } else {
                 view.draw(&mut self.gfx);
             }
@@ -691,11 +755,13 @@ impl View<'_> {
         .into_iter()
         .enumerate()
         {
-            let x = 338.0 + index as f32 * 129.0;
+            let x = 308.0 + index as f32 * 135.0;
             Rect::new(x, 24.0, 111.0, 46.0).panel(g, INSET, EDGE);
             Rect::new(x + 10.0, 29.0, 90.0, 16.0).label(g, name, Font::Small, DIM);
             Rect::new(x + 10.0, 43.0, 97.0, 23.0).label(g, &value.to_string(), Font::Big, color);
         }
+        ADVICE.button(g, "秘書の助言", false, true);
+        REPORT.button(g, "執事の戦果", false, true);
         HELP.button(g, "遊び方  F1", false, true);
         self.map(g);
         self.side(g);
@@ -1327,8 +1393,171 @@ impl View<'_> {
         BESTIARY_CLOSE.button(g, "閉じる　Esc", true, true);
     }
 
+    fn draw_duel(&self, g: &mut Gfx, duel: &Duel) {
+        Rect::new(0.0, 0.0, W, H).fill(g, BG);
+        let field = Rect::new(25.0, 82.0, 1190.0, 502.0);
+        self.art.draw(g, ARENA, field, 1.0);
+        field.inset(1.0).edge(g, GOLD);
+        Rect::new(26.0, 24.0, 1188.0, 44.0).label(g, "玉座の戦い", Font::TitleMid, GOLD);
+        let level = self.game.boss_level();
+        let enemy = ADVENTURERS[duel.class as usize].name;
+        self.art.draw(
+            g,
+            DUEL_BOSS,
+            Rect::new(170.0, 257.0, 310.0, 292.0),
+            if self.game.boss > 0 { 1.0 } else { 0.35 },
+        );
+        self.art
+            .draw_adventurer(g, duel.class, Rect::new(771.0, 255.0, 258.0, 266.0));
+        for (x, name, hp, max_hp, mp, max_mp, color) in [
+            (
+                55.0,
+                format!("氷の主　Lv.{level}"),
+                self.game.boss,
+                self.game.max_boss(),
+                duel.boss_mp,
+                boss_mp(level),
+                TEAL,
+            ),
+            (
+                829.0,
+                format!("{enemy}　Lv.{}", duel.level),
+                duel.hp,
+                duel.max_hp,
+                duel.mp,
+                duel.max_mp,
+                RED,
+            ),
+        ] {
+            Rect::new(x, 101.0, 356.0, 104.0).panel(g, INSET, GOLD);
+            Rect::new(x + 16.0, 112.0, 320.0, 28.0).label(g, &name, Font::Big, TEXT);
+            health_bar(
+                g,
+                Rect::new(x + 16.0, 147.0, 324.0, 10.0),
+                hp as f32,
+                max_hp as f32,
+                color,
+            );
+            Rect::new(x + 16.0, 169.0, 320.0, 22.0).label(
+                g,
+                &format!("HP {hp}/{max_hp}　 MP {mp}/{max_mp}"),
+                Font::Normal,
+                TEXT,
+            );
+        }
+        Rect::new(25.0, 599.0, 824.0, 152.0).panel(g, INSET, GOLD);
+        Rect::new(48.0, 611.0, 750.0, 24.0).label(
+            g,
+            &format!("第{}波　ターン {}", self.game.wave, duel.turn),
+            Font::Normal,
+            GOLD,
+        );
+        for (index, line) in duel.lines.iter().enumerate() {
+            Rect::new(48.0, 644.0 + index as f32 * 30.0, 767.0, 24.0).label(
+                g,
+                line,
+                Font::Normal,
+                TEXT,
+            );
+        }
+        Rect::new(865.0, 599.0, 350.0, 152.0).panel(g, PANEL, GOLD);
+        if duel.outcome.is_some() {
+            DUEL_NEXT.button(g, "次へ　[Enter]", true, true);
+        } else {
+            for (index, command) in Command::ALL.into_iter().enumerate() {
+                let detail = if command.level() > level {
+                    format!("Lv.{}で解放", command.level())
+                } else if command.mp() > 0 {
+                    format!("MP {}", command.mp())
+                } else {
+                    format!("[{}]", index + 1)
+                };
+                duel_button(index).button(
+                    g,
+                    &format!("{}  {detail}", command.name()),
+                    false,
+                    duel.available(command, level),
+                );
+            }
+        }
+    }
+
+    fn court(&self, g: &mut Gfx, overlay: Overlay) {
+        Rect::new(283.0, 202.0, 674.0, 379.0).panel(g, PANEL, GOLD);
+        let secretary = overlay == Overlay::Secretary;
+        self.art.draw(
+            g,
+            if secretary { SECRETARY } else { BUTLER },
+            Rect::new(298.0, 244.0, 234.0, 312.0),
+            1.0,
+        );
+        Rect::new(548.0, 235.0, 377.0, 39.0).label(
+            g,
+            if secretary {
+                "魔族の秘書 レイラ"
+            } else {
+                "執事 セヴラン"
+            },
+            Font::Big,
+            GOLD,
+        );
+        if secretary {
+            let (count, level) = self.game.forecast();
+            let floor = self.game.floor();
+            let development = floor.development(self.game.floors.len() - 1);
+            let (first, second) = if self.game.running() {
+                (
+                    "襲撃中です。冒険者が玉座に着いたら、氷の主に戦いの指示を出してください。"
+                        .into(),
+                    "襲撃が終わったら、玉座までの予想経路を確認して守りを見直しましょう。".into(),
+                )
+            } else if count == 0 {
+                ("空いている通路に宝箱を置きましょう。並品なら少人数の襲撃から迎えられます。".into(), "宝箱を調べると予想経路が見えます。その道の曲がり角や分岐の手前を守りましょう。".into())
+            } else {
+                (format!("次は{count}人、最大Lv.{level}です。罠や魔物がいない脇道を回られないよう、岩壁で経路を調整しましょう。"), format!("この階の開発は{development}/{FLOOR_DEVELOPMENT_GOAL}です。内壁を掘って分岐や回り道を作ると、新しい仲間が加わります。"))
+            };
+            Rect::new(548.0, 290.0, 375.0, 75.0).label(g, &first, Font::Normal, TEXT);
+            Rect::new(548.0, 380.0, 375.0, 92.0).label(g, &second, Font::Normal, TEXT);
+        } else if let Some(report) = &self.game.last_report {
+            for (index, line) in [
+                format!("第{}波の戦果をご報告します。", report.wave),
+                format!(
+                    "撃退 {}人　逃走 {}人　玉座到達 {}人",
+                    report.stopped, report.fled, report.throne
+                ),
+                format!(
+                    "回収　金貨 {}　骨材 {}　戦利品 {}",
+                    report.gold, report.bones, report.loot
+                ),
+                format!("開けられた宝箱 {}個", report.chests),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                Rect::new(548.0, 290.0 + index as f32 * 42.0, 377.0, 28.0).label(
+                    g,
+                    &line,
+                    Font::Normal,
+                    TEXT,
+                );
+            }
+        } else {
+            Rect::new(548.0, 290.0, 375.0, 75.0).label(
+                g,
+                "襲撃が終わり次第、戦果と回収した資材をご報告します。",
+                Font::Normal,
+                TEXT,
+            );
+        }
+        COURT_CLOSE.button(g, "閉じる　[Esc]", true, true);
+    }
+
     fn overlay(&self, g: &mut Gfx, overlay: Overlay) {
         Rect::new(0.0, 0.0, W, H).fill(g, [0.025, 0.04, 0.065, 0.86]);
+        if matches!(overlay, Overlay::Secretary | Overlay::Butler) {
+            self.court(g, overlay);
+            return;
+        }
         if let Overlay::Bestiary(page) = overlay {
             self.bestiary(g, page);
             return;
@@ -1339,7 +1568,7 @@ impl View<'_> {
             for (i, (title, detail)) in [
                 ("建設", "右の指示を選び、迷路の区画を押すとゴブリンが作業します。分岐や回り道を掘ると、図鑑から新しい魔物を配置できます。"),
                 ("おびき寄せる", "宝箱を置くと冒険者が来ます。箱が多いほど人数が増え、レアな品には強敵が来ます。開けられた箱は消えます。冒険者は罠や魔物を避けて進みます。"),
-                ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨と資材を回収します。HPは魔物が青緑、冒険者が赤です。玉座の主が倒されると陥落します。"),
+                ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨と資材を回収します。HPは魔物が青緑、冒険者が赤です。玉座ではターン制で戦い、氷の主が倒れると陥落します。"),
                 ("拡張と委任", "撃退で迷路と配置枠が広がります。規模3、撃退20、階の開発24で次の階を掘れます。前の階を中ボスに任せられます。"),
             ].into_iter().enumerate() {
                 let y = 236.0 + 78.0 * i as f32;
@@ -1359,7 +1588,7 @@ impl View<'_> {
             Overlay::Descend => ("新しいフロア", format!("金貨{FLOOR_GOLD_COST}と骨材{FLOOR_BONE_COST}を使い、地下{}階を掘ります。前の階を任せると中ボスが迎撃し、Lv.{}以上の冒険者は次の階へ通します。", self.game.floors.len() + 1, self.floor().pass_level())),
             Overlay::Reset => ("最初から始める", "現在の迷宮と進行記録を消去して、地下1階から始めます。".into()),
             Overlay::Defeat => ("迷宮陥落", format!("氷の主が倒されました。第{}波・累計撃退{}人・地下{}階", self.game.wave, self.game.kills, self.game.floors.len())),
-            Overlay::Help | Overlay::Bestiary(_) => unreachable!(),
+            Overlay::Help | Overlay::Bestiary(_) | Overlay::Secretary | Overlay::Butler => unreachable!(),
         };
         Rect::new(306.0, 286.0, 628.0, 52.0).label(
             g,

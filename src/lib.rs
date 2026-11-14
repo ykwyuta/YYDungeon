@@ -1,4 +1,5 @@
 mod adventurers;
+mod duel;
 mod dungeon;
 mod monsters;
 
