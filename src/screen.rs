@@ -107,6 +107,51 @@ fn health_bar(g: &Gfx, rect: Rect, hp: f32, max_hp: f32, ink: Color) {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Rock {
+    Diggable,
+    Built,
+    Solid,
+}
+
+impl Rock {
+    const ALL: [Self; 3] = [Self::Diggable, Self::Built, Self::Solid];
+
+    fn at(floor: &Floor, cell: Cell) -> Self {
+        if floor.has_placed_rock(cell) {
+            Self::Built
+        } else if floor.dig_development(cell).is_some() {
+            Self::Diggable
+        } else {
+            Self::Solid
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Diggable => "掘削できる岩",
+            Self::Built => "設置した岩壁",
+            Self::Solid => "掘削できない岩",
+        }
+    }
+
+    fn sprite(self) -> usize {
+        match self {
+            Self::Diggable => ROCK_DIGGABLE,
+            Self::Built => ROCK_BUILT,
+            Self::Solid => ROCK_SOLID,
+        }
+    }
+
+    fn background(self) -> Color {
+        match self {
+            Self::Diggable => rgb(0x35271d),
+            Self::Built => rgb(0x1e3546),
+            Self::Solid => rgb(0x151b24),
+        }
+    }
+}
+
 struct Grid {
     rect: Rect,
     size: f32,
@@ -155,7 +200,10 @@ const SECRETARY: usize = 12;
 const BUTLER: usize = 13;
 const ARENA: usize = 14;
 const DUEL_BOSS: usize = 15;
-const SPRITES: [&[u8]; 16] = [
+const ROCK_DIGGABLE: usize = 16;
+const ROCK_BUILT: usize = 17;
+const ROCK_SOLID: usize = 18;
+const SPRITES: [&[u8]; 19] = [
     include_bytes!("../assets/warden.png"),
     include_bytes!("../assets/sentinel.png"),
     include_bytes!("../assets/goblin.png"),
@@ -172,6 +220,9 @@ const SPRITES: [&[u8]; 16] = [
     include_bytes!("../assets/butler.png"),
     include_bytes!("../assets/throne-arena.jpg"),
     include_bytes!("../assets/throne-boss-back.png"),
+    include_bytes!("../assets/rock-diggable.png"),
+    include_bytes!("../assets/rock-built.png"),
+    include_bytes!("../assets/rock-solid.png"),
 ];
 
 type Sprite = (Bitmap, f32);
@@ -981,24 +1032,9 @@ impl View<'_> {
                         );
                     }
                 } else {
-                    rect.fill(g, rgb(0x151b24));
-                    let brick = Rect::new(rect.x + 1.0, rect.y + 1.0, rect.w - 2.0, rect.h - 6.0);
-                    brick.fill(
-                        g,
-                        [rgb(0x4d5864), rgb(0x454f5a), rgb(0x505b64), rgb(0x475361)][salt],
-                    );
-                    Rect::new(brick.x, brick.y, brick.w, 2.0).fill(g, rgb(0x65707b));
-                    Rect::new(brick.x, brick.y + brick.h * 0.48, brick.w, 2.0)
-                        .fill(g, rgb(0x303945));
-                    Rect::new(brick.x + brick.w * 0.62, brick.y, 1.0, brick.h * 0.5)
-                        .fill(g, rgb(0x303945));
-                    Rect::new(
-                        brick.x + brick.w * 0.31,
-                        brick.y + brick.h * 0.5,
-                        1.0,
-                        brick.h * 0.5,
-                    )
-                    .fill(g, rgb(0x303945));
+                    let rock = Rock::at(floor, cell);
+                    rect.fill(g, rock.background());
+                    self.art.draw(g, rock.sprite(), rect.inset(1.0), 1.0);
                 }
                 if cell == ENTRY || cell == THRONE {
                     rect.inset(2.0).panel(
@@ -1174,21 +1210,28 @@ impl View<'_> {
                     }
                     .into(),
                     None if floor.open(cell) => "通路".into(),
-                    None if floor.has_placed_rock(cell) => "設置した岩壁　掘削で通路に戻す".into(),
-                    None if self.order == Order::Dig => floor.dig_development(cell).map_or_else(
-                        || "石壁".into(),
-                        |gain| format!("石壁　掘削で迷宮開発 +{gain}"),
-                    ),
-
-                    None => "石壁".into(),
+                    None => match Rock::at(floor, cell) {
+                        Rock::Built => "設置した岩壁　掘削で通路に戻す".into(),
+                        Rock::Diggable if self.order == Order::Dig => {
+                            let gain = floor.dig_development(cell).unwrap_or_default();
+                            format!("掘削できる岩　迷宮開発 +{gain}")
+                        }
+                        rock => rock.name().into(),
+                    },
                 }
             };
             format!("{:02} / {:02}　　{}", cell.x + 1, cell.y + 1, label)
         } else {
             "入口から玉座まで、冒険者の通り道を守ろう。".into()
         };
-        Rect::new(43.0, 615.0, 510.0, 22.0).label(g, &detail, Font::Normal, DIM);
-        Rect::new(598.0, 616.0, 200.0, 22.0).label(g, "●　危険を避ける予想経路", Font::Small, GOLD);
+        Rect::new(43.0, 615.0, 328.0, 22.0).label(g, &detail, Font::Normal, DIM);
+        for (index, rock) in Rock::ALL.into_iter().enumerate() {
+            let x = 383.0 + index as f32 * 105.0;
+            self.art
+                .draw(g, rock.sprite(), Rect::new(x, 612.0, 23.0, 23.0), 1.0);
+            Rect::new(x + 26.0, 616.0, 82.0, 19.0).label(g, rock.name(), Font::Small, DIM);
+        }
+        Rect::new(710.0, 616.0, 112.0, 22.0).label(g, "● 予想経路", Font::Small, GOLD);
     }
 
     fn side(&self, g: &mut Gfx) {
@@ -1255,13 +1298,15 @@ impl View<'_> {
                     Rect::new(rect.x + 6.0, rect.y + 2.0, 29.0, 26.0),
                     if build { 1.0 } else { 0.55 },
                 ),
+                5 | 7 => self.art.draw(
+                    g,
+                    if i == 5 { ROCK_DIGGABLE } else { ROCK_BUILT },
+                    Rect::new(rect.x + 6.0, rect.y + 2.0, 29.0, 26.0),
+                    if build { 1.0 } else { 0.55 },
+                ),
                 _ => Rect::new(rect.x + 7.0, rect.y + 4.0, 26.0, 26.0).label(
                     g,
-                    match i {
-                        5 => "＋",
-                        6 => "−",
-                        _ => "▣",
-                    },
+                    "−",
                     Font::NormalCenter,
                     GOLD,
                 ),

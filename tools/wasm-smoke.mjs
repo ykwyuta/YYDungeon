@@ -39,7 +39,7 @@ wasm.yy_frame(0.25, 1);
 assert.ok(labels.has("はじめる　 [Enter]"));
 assert.equal(wasm.yy_can_autosave(), 0);
 assert.equal(game().countdown, 42);
-assert.equal(sprites, 75);
+assert.equal(sprites, 78);
 wasm.yy_event(2, 112, 0);
 wasm.yy_frame(0, 1);
 assert.ok(labels.has("キャッシュを消して再読み込み"));
@@ -125,10 +125,22 @@ wasm.yy_event(1, 335, 352);
 wasm.yy_frame(0, 1);
 assert.ok(game().floors[0].sites.some(site => site?.Monster?.id === 4));
 
+spritesDrawn.length = 0;
 wasm.yy_event(2, 56, 0); // 8 places a rock on an unused passage.
 wasm.yy_event(1, 244, 261);
 wasm.yy_frame(0, 1);
 assert.ok(game().floors[0].placed_rocks.some(cell => cell.x === 2 && cell.y === 1));
+for (const label of ["掘削できる岩", "設置した岩壁", "掘削できない岩"]) {
+  assert.ok(labels.has(label));
+}
+const rockSpriteAt = (x, y) => spritesDrawn.find(sprite =>
+  sprite.x >= x && sprite.x < x + 46 && sprite.y >= y && sprite.y < y + 46 && sprite.width >= 42
+)?.id;
+const builtRock = rockSpriteAt(221, 237);
+const diggableRock = rockSpriteAt(267, 283);
+const solidRock = rockSpriteAt(129, 191);
+assert.ok(builtRock && diggableRock && solidRock);
+assert.equal(new Set([builtRock, diggableRock, solidRock]).size, 3);
 const developmentBefore = game().development;
 wasm.yy_event(2, 54, 0);
 wasm.yy_event(1, 244, 261);
