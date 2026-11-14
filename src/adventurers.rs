@@ -43,16 +43,23 @@ pub const ADVENTURERS: [Adventurer; 12] = [
     Adventurer::new("勇者", 24, 5, 2, 1, 14),
 ];
 
-pub fn strongest_class(level: u8) -> usize {
+pub const MAX_RAID_LEVEL: u32 = 1_000_000_000;
+pub const MAX_ADVENTURER_HP: i32 = 600;
+
+pub fn combat_power(level: u32) -> u32 {
+    level.min(12) + level.saturating_sub(12).min(240) / 4
+}
+
+pub fn strongest_class(level: u32) -> usize {
     match level {
-        1 => 2,
-        2..=3 => 5,
-        4..=6 => 8,
+        0..=3 => 2,
+        4..=8 => 5,
+        9..=15 => 8,
         _ => 11,
     }
 }
 
-pub fn raid_class(level: u8, wave: u32, index: usize, leader: bool) -> u8 {
+pub fn raid_class(level: u32, wave: u32, index: usize, leader: bool) -> u8 {
     let strongest = strongest_class(level);
     if leader && strongest > 2 {
         return strongest as u8;

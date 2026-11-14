@@ -1,4 +1,4 @@
-use crate::adventurers::ADVENTURERS;
+use crate::adventurers::{combat_power, ADVENTURERS, MAX_ADVENTURER_HP, MAX_RAID_LEVEL};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,7 +40,7 @@ impl Command {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Duel {
     pub class: u8,
-    pub level: u8,
+    pub level: u32,
     pub hp: u32,
     pub max_hp: u32,
     pub mp: u8,
@@ -72,9 +72,13 @@ pub struct Turn {
 }
 
 impl Duel {
-    pub fn new(class: u8, level: u8, hp: u32, max_hp: u32, boss_level: u32) -> Self {
+    pub fn new(class: u8, level: u32, hp: u32, max_hp: u32, boss_level: u32) -> Self {
         let name = ADVENTURERS[class as usize].name;
-        let mp = if level >= 3 { 2 + level } else { 0 };
+        let mp = if level >= 3 {
+            (2 + level.min(15)) as u8
+        } else {
+            0
+        };
         Self {
             class,
             level,
@@ -111,7 +115,7 @@ impl Duel {
         self.boss_mp -= command.mp();
         self.lines.clear();
         let enemy = &ADVENTURERS[self.class as usize];
-        // Floor level continues to unlock MP, with slower damage growth after Lv. 10.
+        // Boss level continues to unlock MP, with slower damage growth after Lv. 10.
         let power = boss_level.min(10) + boss_level.saturating_sub(10) / 8;
         let damage = match command {
             Command::Claw => (10 + 3 * power).saturating_sub(enemy.trap_armor as u32),
@@ -159,7 +163,7 @@ impl Duel {
             self.lines.push(format!("{}は逃げ出した！", enemy.name));
             return Some(turn);
         }
-        let level = u32::from(self.level);
+        let level = combat_power(self.level);
         let (enemy_move, attack, mut damage) =
             if self.level >= 7 && self.mp >= 5 && self.turn % 2 == 1 {
                 self.mp -= 5;
@@ -193,8 +197,8 @@ impl Duel {
 
     pub fn valid(&self, boss_level: u32, boss_hp: u32) -> bool {
         (self.class as usize) < ADVENTURERS.len()
-            && (1..=15).contains(&self.level)
-            && (1..=180).contains(&self.max_hp)
+            && (1..=MAX_RAID_LEVEL).contains(&self.level)
+            && (1..=MAX_ADVENTURER_HP as u32).contains(&self.max_hp)
             && self.hp <= self.max_hp
             && self.mp <= self.max_mp
             && self.max_mp <= 17

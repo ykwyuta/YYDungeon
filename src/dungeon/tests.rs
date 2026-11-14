@@ -23,20 +23,6 @@ fn settle(game: &mut Game) {
     panic!("raid did not settle");
 }
 
-fn develop_current_floor(game: &mut Game) {
-    let (w, h) = game.floor().size();
-    let depth = game.floors.len() - 1;
-    for y in 1..h - 1 {
-        for x in 1..w - 1 {
-            if game.floor().development(depth) >= FLOOR_DEVELOPMENT_GOAL {
-                return;
-            }
-            let _ = game.place(Order::Dig, Cell { x, y }, 0);
-        }
-    }
-    assert!(game.floor().development(depth) >= FLOOR_DEVELOPMENT_GOAL);
-}
-
 #[test]
 fn timer_starts_a_raid_and_the_original_defenses_pay_out() {
     let mut game = Game::new();
@@ -53,7 +39,7 @@ fn timer_starts_a_raid_and_the_original_defenses_pay_out() {
 }
 
 #[test]
-fn chest_count_and_rarity_change_the_forecast_and_reward() {
+fn chest_count_controls_party_size_and_rarity_controls_only_rewards() {
     let mut game = Game::new();
     assert_eq!(game.forecast(), (3, 1));
     assert!(game.place(Order::Chest, Cell { x: 1, y: 2 }, 1).is_err());
@@ -62,18 +48,32 @@ fn chest_count_and_rarity_change_the_forecast_and_reward() {
     assert!(game.place(Order::Chest, Cell { x: 2, y: 2 }, 0).is_err());
     game.active().expand();
     game.loot = 5;
+    let mut plain = game.clone();
     game.place(Order::Chest, Cell { x: 1, y: 1 }, 1).unwrap();
-    assert_eq!(game.forecast(), (5, 3));
-    let gold = game.gold;
-    game.reward(3, 0, 0);
-    assert_eq!(game.gold - gold, 27);
+    assert_eq!(game.forecast(), (5, 1));
+    for workshop in [&mut game, &mut plain] {
+        workshop.begin_raid();
+    }
+    assert_eq!(
+        game.raid.as_ref().unwrap().waiting,
+        plain.raid.as_ref().unwrap().waiting
+    );
+    game = Game::load(&game.save()).unwrap();
+    settle(&mut game);
+    settle(&mut plain);
+    let better = game.last_report.unwrap();
+    let normal = plain.last_report.unwrap();
+    assert_eq!(better.stopped, normal.stopped);
+    assert!(better.gold > normal.gold);
+    assert!(better.loot > normal.loot);
+    assert_eq!(better.bones, normal.bones);
 }
 
 #[test]
 fn maze_expansion_and_delegation_keep_a_route_to_the_throne() {
     let mut game = Game::new();
     for _ in 0..20 {
-        game.reward(1, 0, 0);
+        game.reward(1, 0, 0, 0);
     }
     game.finish_raid();
     assert_eq!(game.floor().size(), (17, 13));
@@ -81,13 +81,14 @@ fn maze_expansion_and_delegation_keep_a_route_to_the_throne() {
     assert!(game.floor().route(ENTRY, Cell { x: 15, y: 11 }).is_some());
     assert!(game.floor().monster_limit() > 3 && game.floor().chest_limit() > 2);
     game.place(Order::Chest, Cell { x: 10, y: 7 }, 3).unwrap();
-    develop_current_floor(&mut game);
+    game.boss_xp = boss_level_xp(3);
     game.descend(true).unwrap();
     game.active().expand();
     game.active().expand();
     game.place(Order::Chest, Cell { x: 10, y: 7 }, 3).unwrap();
     assert!(game.floors[0].steward);
     assert!(game.floor().route(ENTRY, THRONE).is_some());
+    game.wave = 10;
     game.begin_raid();
     assert!(game.invaders()[0].level >= game.floors[0].pass_level());
     assert!(game.log.iter().any(|line| line.contains("素通し")));
@@ -98,10 +99,10 @@ fn maze_expansion_and_delegation_keep_a_route_to_the_throne() {
 fn a_steward_stops_weak_invaders_upstairs() {
     let mut game = Game::new();
     for _ in 0..20 {
-        game.reward(1, 0, 0);
+        game.reward(1, 0, 0, 0);
     }
     game.finish_raid();
-    develop_current_floor(&mut game);
+    game.boss_xp = boss_level_xp(3);
     game.descend(false).unwrap();
     game.toggle_steward(0).unwrap();
     game.place(Order::Chest, Cell { x: 10, y: 7 }, 0).unwrap();
@@ -150,44 +151,79 @@ fn construction_checks_walls_resources_and_running_raids() {
 }
 
 #[test]
-fn a_prepared_first_floor_can_earn_and_open_the_second_floor() {
+fn balance_training_requires_throne_wins_and_first_five_floors_are_reachable() {
+    let chest = Cell { x: 10, y: 7 };
+    let mut sealed = Game::new();
+    sealed.begin_raid();
+    settle(&mut sealed);
+    assert_eq!(sealed.last_report.as_ref().unwrap().throne, 0);
+    assert_eq!(sealed.boss_level(), 1);
+    assert!(!sealed.can_descend());
+
     let mut game = Game::new();
-    game.place(Order::Wall, Cell { x: 1, y: 1 }, 0).unwrap();
-    game.place(Order::Goblin, Cell { x: 2, y: 4 }, 0).unwrap();
-    game.place(Order::Goblin, Cell { x: 2, y: 5 }, 0).unwrap();
-    for _ in 0..12 {
-        let cell = Cell { x: 10, y: 7 };
-        if game.floor().site(cell).is_none() {
-            game.place(Order::Chest, cell, 0).unwrap();
+    // Leave the first wave to the garrison, then let some adventurers train the boss.
+    game.begin_raid();
+    settle(&mut game);
+    game.place(Order::Remove, Cell { x: 1, y: 3 }, 0).unwrap();
+    let mut unlocked_at = Vec::new();
+    for _ in 0..32 {
+        if game.floor().site(chest).is_none() {
+            game.place(Order::Chest, chest, 0).unwrap();
         }
-        if game.boss + 30 <= game.max_boss() && game.bones >= 2 {
+        while game.boss + 30 <= game.max_boss() && game.bones >= 2 {
             game.heal().unwrap();
         }
         game.begin_raid();
         settle(&mut game);
+        let report = game.last_report.as_ref().unwrap();
+        eprintln!(
+            "B{} wave {} Lv.{} boss HP {}/{} XP {} stopped {} fled {} throne {}",
+            game.floors.len(),
+            game.wave,
+            game.boss_level(),
+            game.boss,
+            game.max_boss(),
+            game.boss_xp,
+            report.stopped,
+            report.fled,
+            report.throne
+        );
         assert!(!game.defeated, "wave {}, kills {}", game.wave, game.kills);
-        if game.floor().earned() >= 20 {
-            assert!(!game.can_descend());
-            develop_current_floor(&mut game);
-            assert!(game.can_descend());
+        // Reserve a replacement chest and dig a bounded set of branches each wave.
+        for _ in 0..5 {
+            if game.gold < Order::Chest.price() + Order::Dig.price() {
+                break;
+            }
+            let (width, height) = game.floor().size();
+            let next = (1..height - 1)
+                .flat_map(|y| (1..width - 1).map(move |x| Cell { x, y }))
+                .filter_map(|cell| {
+                    game.floor()
+                        .dig_development(cell)
+                        .map(|score| (score, cell))
+                })
+                .max();
+            let Some((_, cell)) = next else { break };
+            game.place(Order::Dig, cell, 0).unwrap();
+        }
+        if game.can_descend() {
+            unlocked_at.push(game.wave);
             game.descend(true).unwrap();
-            assert_eq!(game.floors.len(), 2);
-            assert!(game.floors[0].steward);
-            assert!(game.kills >= 20);
-            let second_floor = game.floor();
-            let path = second_floor.adventurer_route(ENTRY, cell).unwrap();
-            let choke = path[1];
-            game.place(Order::Goblin, choke, 0).unwrap();
-            game.place(Order::Chest, cell, 0).unwrap();
-            assert_eq!(game.forecast(), (3, 1));
-            game.begin_raid();
-            settle(&mut game);
-            assert!(!game.defeated);
-            assert!(game.floor().earned() >= 1);
-            return;
+            if game.floors.len() == 5 {
+                eprintln!("B2 through B5 unlocked on waves {unlocked_at:?}, development {}, supplies {}/{}/{}", game.development, game.gold, game.bones, game.loot);
+                assert!(unlocked_at[0] <= 4 && game.wave <= 12);
+                let wyvern = &MONSTERS[31];
+                assert!(game.monster_unlocked(wyvern));
+                assert!(
+                    game.gold >= wyvern.gold
+                        && game.bones >= wyvern.bones
+                        && game.loot >= wyvern.loot
+                );
+                return;
+            }
         }
     }
-    panic!("only {} adventurers defeated", game.kills);
+    panic!("only reached B{}", game.floors.len());
 }
 
 #[test]
@@ -224,7 +260,7 @@ fn digging_branches_and_loops_unlocks_monsters_and_survives_old_saves() {
 }
 
 #[test]
-fn all_monsters_are_earnable_on_a_developed_floor() {
+fn development_and_depth_gate_ranked_monsters_and_all_materials_are_charged() {
     let mut game = Game::new();
     game.gold = 10000;
     game.active().expand();
@@ -236,28 +272,39 @@ fn all_monsters_are_earnable_on_a_developed_floor() {
             }
         }
     }
-    assert!(MONSTERS
-        .iter()
-        .all(|monster| game.development >= monster.unlock));
+    assert!(game.development >= MONSTERS.last().unwrap().unlock);
+    let cell = Cell { x: 4, y: 3 };
+    for (floor, unlocked) in [(1, 7), (2, 15), (3, 23), (4, 32), (5, 40)] {
+        assert_eq!(
+            MONSTERS.iter().filter(|m| game.monster_unlocked(m)).count(),
+            unlocked
+        );
+        if floor < 5 {
+            assert!(game.place(Order::Recruit(39), cell, 0).is_err());
+            game.boss_xp = boss_level_xp(game.descent_level());
+            game.descend(false).unwrap();
+        }
+    }
+    let dragon = MONSTERS[39];
+    assert!(dragon.hp >= 10 * MONSTERS[GOBLIN as usize].hp);
+    assert!(dragon.gold >= 10 * Order::Goblin.price());
+    game.bones = dragon.bones;
+    game.loot = dragon.loot - 1;
+    assert!(game.place(Order::Recruit(39), cell, 0).is_err());
+    game.loot += 1;
+    let gold = game.gold;
+    game.place(Order::Recruit(39), cell, 0).unwrap();
+    assert_eq!(
+        (game.gold, game.bones, game.loot),
+        (gold - dragon.gold, 0, 0)
+    );
+    assert!(Game::load(&game.save()).is_some());
 }
 
 #[test]
-fn legendary_treasure_attracts_a_hero_and_the_raid_resumes_from_save() {
+fn a_hero_arrives_in_later_waves_even_with_plain_treasure() {
     let mut game = Game::new();
-    game.begin_raid();
-    let original = game.raid.as_ref().unwrap();
-    assert_eq!(original.invaders[0].class, 0);
-    assert_eq!(
-        original.waiting.iter().copied().collect::<Vec<_>>(),
-        [(1, 1), (1, 2)]
-    );
-    assert!(Game::load(&game.save()).is_some());
-
-    let mut game = Game::new();
-    game.active().expand();
-    game.active().expand();
-    game.loot = 3;
-    game.place(Order::Chest, Cell { x: 10, y: 7 }, 3).unwrap();
+    game.wave = 15;
     game.begin_raid();
     for _ in 0..16 {
         game.tick(0.25);
@@ -267,19 +314,15 @@ fn legendary_treasure_attracts_a_hero_and_the_raid_resumes_from_save() {
         .iter()
         .find(|invader| invader.class == 11)
         .unwrap();
-    assert_eq!(ADVENTURERS[hero.class as usize].name, "勇者");
-    assert_eq!(hero.level, 7);
-    assert_eq!(hero.max_hp, 109);
+    assert_eq!(hero.level, 16);
+    assert_eq!(hero.max_hp, 115);
     assert_eq!(Game::load(&game.save()).unwrap().save(), game.save());
-    let before = game.gold;
-    game.reward(7, 0, 11);
-    assert_eq!(game.gold - before, 65);
 }
 
 #[test]
 fn smaller_raids_rotate_through_each_rank_including_its_leader() {
     use crate::adventurers::strongest_class;
-    for (level, expected) in [(1, 0..3), (3, 3..6), (5, 6..9), (7, 9..12)] {
+    for (level, expected) in [(1, 0..3), (4, 3..6), (9, 6..9), (16, 9..12)] {
         let mut encountered = [false; ADVENTURERS.len()];
         for wave in 1..=4 {
             for index in 0..3 {
@@ -467,31 +510,37 @@ fn adventurers_choose_safe_detours_but_can_cross_unavoidable_defenses() {
 }
 
 #[test]
-fn new_floor_requires_its_own_development_and_resets_raid_pressure() {
+fn legacy_save_preserves_boss_level_and_missing_hp() {
+    let mut game = Game::new();
+    game.floors.push(Floor::new(1));
+    game.active().expand();
+    let legacy_max = game.max_boss();
+    game.boss = legacy_max - 20;
+    let mut legacy = serde_json::from_slice::<serde_json::Value>(&game.save()).unwrap();
+    legacy[1].as_object_mut().unwrap().remove("boss_xp");
+    let saved = Game::load(&serde_json::to_vec(&legacy).unwrap()).unwrap();
+    assert_eq!(saved.boss_level(), 4);
+    assert_eq!(saved.max_boss() - saved.boss, 20);
+}
+
+#[test]
+fn only_boss_level_unlocks_each_new_floor_and_wave_pressure_is_global() {
     let mut game = Game::new();
     game.wave = 80;
-    for _ in 0..20 {
-        game.reward(1, 0, 0);
-    }
-    game.finish_raid();
-    assert_eq!(game.forecast(), (3, 3));
-    assert_eq!(game.floor().development(0), 0);
-    assert!(game.descend(false).unwrap_err().contains("開発24"));
-    develop_current_floor(&mut game);
-    let saved = Game::load(&game.save()).unwrap();
-    assert!(saved.can_descend());
+    assert_eq!(game.forecast(), (3, 81));
+    assert!(game.descend(false).is_err());
+    game.boss_xp = boss_level_xp(3);
+    game.gold = 0;
+    assert_eq!(game.development, 0);
+    assert!(Game::load(&game.save()).unwrap().can_descend());
     game.descend(false).unwrap();
-    assert_eq!(game.floor().development(1), 0);
-    assert!(game.development >= FLOOR_DEVELOPMENT_GOAL);
+    assert_eq!(game.boss_level(), 3);
+    assert_eq!(game.gold, 0);
+    assert_eq!(game.floors[0].tier, 1);
     game.place(Order::Chest, Cell { x: 10, y: 7 }, 0).unwrap();
-    assert_eq!(game.forecast(), (3, 1));
-
-    for _ in 0..20 {
-        game.reward(1, 1, 0);
-    }
-    game.finish_raid();
-    assert!(game.descend(false).unwrap_err().contains("開発24"));
-    develop_current_floor(&mut game);
+    assert_eq!(game.forecast(), (3, 81));
+    assert!(game.descend(false).is_err());
+    game.boss_xp = boss_level_xp(5);
     assert!(game.can_descend());
 }
 
@@ -543,6 +592,13 @@ fn advanced_duelists_use_stronger_magic_and_injured_adventurers_can_flee() {
         duel.outcome == Some(Outcome::Fled)
     });
     assert!(escaped);
+    let mut game = Game::new();
+    game.begin_raid();
+    let mut fled = Duel::new(1, 1, 2, 40, 1);
+    fled.outcome = Some(Outcome::Fled);
+    game.raid.as_mut().unwrap().duel = Some(fled);
+    game.dismiss_duel();
+    assert_eq!(game.boss_experience(), (0, 10));
 }
 
 #[test]
@@ -597,7 +653,7 @@ fn mp_carries_between_duels_after_saving_and_guard_recovers_it() {
     game.duel_command(Command::Guard).unwrap();
     assert_eq!(
         game.duel().unwrap().boss_mp,
-        (max_mp - spent + 4).min(max_mp)
+        (max_mp - spent + 4).min(boss_mp(game.boss_level()))
     );
 }
 

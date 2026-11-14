@@ -23,6 +23,10 @@ impl Tactic {
 pub struct Monster {
     pub name: &'static str,
     pub unlock: u32,
+    pub floor: usize,
+    pub level: u32,
+    pub rank: &'static str,
+    pub loot: u32,
     pub gold: u32,
     pub bones: u32,
     pub hp: u16,
@@ -40,13 +44,24 @@ impl Monster {
         damage: i32,
         tactic: Tactic,
     ) -> Self {
+        let (floor, level, rank, rate, extra_bones, loot) = match unlock {
+            0..=12 => (1, 1 + unlock / 3, "D", 100, 0, 0),
+            13..=39 => (2, 8 + (unlock - 13) / 4, "C", 140, 1, 0),
+            40..=74 => (3, 17 + (unlock - 40) / 4, "B", 200, 4, 2),
+            75..=110 => (4, 29 + (unlock - 75) / 4, "A", 270, 8, 5),
+            _ => (5, 43 + (unlock - 111) / 3, "S", 360, 14, 10),
+        };
         Self {
             name,
             unlock,
-            gold,
-            bones,
-            hp,
-            damage,
+            floor,
+            level,
+            rank,
+            loot,
+            gold: gold * rate / 100,
+            bones: bones + extra_bones,
+            hp: hp * rate as u16 / 100,
+            damage: damage * rate as i32 / 100,
             tactic,
         }
     }

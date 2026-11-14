@@ -1,4 +1,6 @@
-use crate::adventurers::{raid_class, ADVENTURERS};
+use crate::adventurers::{
+    combat_power, raid_class, ADVENTURERS, MAX_ADVENTURER_HP, MAX_RAID_LEVEL,
+};
 use crate::duel::{boss_mp, Command, Duel, Outcome, Turn};
 use crate::monsters::{Monster, Tactic, GOBLIN, MONSTERS, SENTINEL};
 use serde::{Deserialize, Serialize};
@@ -11,9 +13,9 @@ pub const ENTRY: Cell = Cell { x: 0, y: 3 };
 pub const THRONE: Cell = Cell { x: 11, y: 5 };
 pub const PREPARE: f32 = 42.0;
 pub const MAX_FLOORS: usize = 100;
-pub const FLOOR_DEVELOPMENT_GOAL: u32 = 24;
-pub const FLOOR_GOLD_COST: u32 = 100;
-pub const FLOOR_BONE_COST: u32 = 6;
+pub const REWARD_PERCENT: [u32; 4] = [100, 135, 175, 225];
+const MAX_BOSS_XP: u32 = 1_000_000_000;
+
 const RAID_RECOVERY_GOLD: u32 = 10;
 const STEP: f32 = 0.33;
 const COMBAT_ROUNDS: u8 = 3;
@@ -24,7 +26,12 @@ const RAID_MAX: usize = 32;
 const MIN_ACTIVE_INVADERS: usize = 2;
 const DUEL_MP_RECOVERY: u8 = 2;
 
-fn missing_development() -> u32 {
+// Inverted by Game::boss_level.
+fn boss_level_xp(level: u32) -> u32 {
+    2 * (level - 1) * (level + 3)
+}
+
+fn missing_progress() -> u32 {
     u32::MAX
 }
 pub const SAVE_LIMIT: usize = 300_000;
@@ -134,6 +141,13 @@ impl Order {
         match self {
             Self::Recruit(id) => MONSTERS[id as usize].bones,
             Self::Frost => 1,
+            _ => 0,
+        }
+    }
+
+    pub fn loot(self) -> u32 {
+        match self {
+            Self::Recruit(id) => MONSTERS[id as usize].loot,
             _ => 0,
         }
     }
@@ -478,9 +492,9 @@ impl Floor {
         }
     }
 
-    pub fn pass_level(&self) -> u8 {
+    pub fn pass_level(&self) -> u32 {
         // Small parties stay upstairs. Strong ones always pass through.
-        (2 + self.tier as usize + self.monster_count() / 2).min(10) as u8
+        (2 + self.tier as usize + self.monster_count() / 2).min(10) as u32
     }
 }
 
@@ -492,7 +506,7 @@ struct Encounter {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Invader {
-    pub level: u8,
+    pub level: u32,
     pub hp: i32,
     pub max_hp: i32,
     pub class: u8,
@@ -519,11 +533,13 @@ impl Invader {
 struct Raid {
     #[serde(default)]
     tally: Report,
+    #[serde(default)]
+    reward_rarity: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     duel: Option<Duel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     boss_mp: Option<u8>,
-    waiting: VecDeque<(u8, u8)>,
+    waiting: VecDeque<(u32, u8)>,
     pub invaders: Vec<Invader>,
     clock: f32,
     spawn: u32,
@@ -545,7 +561,7 @@ pub struct Report {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Game {
     pub floors: Vec<Floor>,
-    #[serde(default = "missing_development")]
+    #[serde(default = "missing_progress")]
     pub development: u32,
     pub gold: u32,
     pub bones: u32,
@@ -553,6 +569,8 @@ pub struct Game {
     pub kills: u32,
     pub wave: u32,
     pub boss: u32,
+    #[serde(default = "missing_progress")]
+    boss_xp: u32,
     pub countdown: f32,
     pub paused: bool,
     pub log: Vec<String>,
@@ -582,6 +600,7 @@ impl Game {
             kills: 0,
             wave: 0,
             boss: 110,
+            boss_xp: 0,
             countdown: PREPARE,
             paused: false,
             log: vec!["秘書レイラ：宝箱までの予想経路を確認し、分岐の手前を守りましょう。".into()],
@@ -600,11 +619,43 @@ impl Game {
     }
 
     pub fn max_boss(&self) -> u32 {
-        110 + 20 * (self.floors.len() - 1) as u32 + 12 * (self.floor().tier - 1) as u32
+        110 + 20 * (self.floors.len() - 1) as u32
+            + 12 * (self.floor().tier - 1) as u32
+            + 8 * (self.boss_level() - 1)
     }
 
     pub fn boss_level(&self) -> u32 {
-        1 + 2 * (self.floors.len() as u32 - 1) + u32::from(self.floor().tier - 1)
+        (self.boss_xp / 2 + 4).isqrt() - 1
+    }
+
+    pub fn boss_experience(&self) -> (u32, u32) {
+        let level = self.boss_level();
+        let start = boss_level_xp(level);
+        (self.boss_xp - start, boss_level_xp(level + 1) - start)
+    }
+
+    pub fn descent_level(&self) -> u32 {
+        1 + 2 * self.floors.len() as u32
+    }
+
+    pub fn monster_unlocked(&self, monster: &Monster) -> bool {
+        self.floors.len() >= monster.floor && self.development >= monster.unlock
+    }
+
+    fn gain_boss_experience(&mut self, level: u32) {
+        let old_level = self.boss_level();
+        let old_max = self.max_boss();
+        let earned = (6 + combat_power(level)).min(MAX_BOSS_XP - self.boss_xp);
+        self.boss_xp += earned;
+        let new_level = self.boss_level();
+        self.boss += self.max_boss() - old_max;
+        if new_level > old_level {
+            self.message(format!(
+                "氷の主は経験値 +{earned} を得て、Lv.{new_level}になりました。"
+            ));
+        } else {
+            self.message(format!("氷の主の経験値 +{earned}"));
+        }
     }
 
     pub fn duel(&self) -> Option<&Duel> {
@@ -626,12 +677,16 @@ impl Game {
         };
         let duel = raid.duel.take().expect("finished duel");
         match outcome {
-            Outcome::Victory => self.raid_reward(
-                &mut raid.tally,
-                duel.level,
-                self.floors.len() - 1,
-                duel.class,
-            ),
+            Outcome::Victory => {
+                self.raid_reward(
+                    &mut raid.tally,
+                    duel.level,
+                    self.floors.len() - 1,
+                    duel.class,
+                    raid.reward_rarity,
+                );
+                self.gain_boss_experience(duel.level);
+            }
             Outcome::Fled => {
                 raid.tally.fled += 1;
                 self.message(format!(
@@ -694,7 +749,10 @@ impl Game {
             let monster = MONSTERS
                 .get(id as usize)
                 .ok_or("その魔物は見つかりません。")?;
-            if monster.unlock > self.development {
+            if monster.floor > self.floors.len() {
+                return Err("必要な階に到達すると、この魔物を仲間にできます。");
+            }
+            if !self.monster_unlocked(monster) {
                 return Err("迷路を開発して、この魔物を仲間にしてください。");
             }
         }
@@ -764,7 +822,9 @@ impl Game {
             let unlocked = MONSTERS
                 .iter()
                 .filter(|monster| {
-                    monster.unlock > self.development && monster.unlock <= self.development + gain
+                    monster.floor <= self.floors.len()
+                        && monster.unlock > self.development
+                        && monster.unlock <= self.development + gain
                 })
                 .map(|monster| monster.name)
                 .collect::<Vec<_>>();
@@ -796,7 +856,7 @@ impl Game {
                 if rarity == old_rarity {
                     return Err("すでに同じレア度の品が入っています。");
                 }
-                // A new offering replaces the old one, including when lowering danger.
+                // A new offering replaces the old one, including when lowering the reward bonus.
                 (8 + 12 * rarity as u32, loot)
             } else {
                 if self.floor().chest_count() >= self.floor().chest_limit() {
@@ -812,7 +872,7 @@ impl Game {
             if site.is_trap() && self.floor().trap_count() >= self.floor().trap_limit() {
                 return Err("罠の配置上限です。");
             }
-            (order.price(), 0)
+            (order.price(), order.loot())
         };
         if self.gold < gold || self.bones < order.bones() || self.loot < loot {
             return Err("金貨、骨材、または戦利品が足りません。");
@@ -833,47 +893,36 @@ impl Game {
         Ok(())
     }
 
-    pub fn forecast(&self) -> (usize, u8) {
-        let mut rarities = self.floor().sites.iter().filter_map(|site| match site {
-            Some(Site::Chest { rarity }) => Some(*rarity),
-            _ => None,
-        });
-        let Some(first) = rarities.next() else {
+    pub fn forecast(&self) -> (usize, u32) {
+        let count = self.floor().chest_count();
+        if count == 0 {
             return (0, 0);
-        };
-        let (count, best) = rarities.fold((1, first), |(count, best), rarity| {
-            (count + 1, best.max(rarity))
-        });
+        }
         (
             (1 + 2 * count).min(RAID_MAX),
-            1 + best * 2 + self.local_raid_rank() + self.deep_treasure_rank(best),
+            (self.wave + 1).min(MAX_RAID_LEVEL),
         )
     }
 
-    fn deep_treasure_rank(&self, rarity: u8) -> u8 {
-        if rarity >= 2 {
-            ((self.floors.len() - 1) / 2).min(3) as u8
-        } else {
-            0
-        }
-    }
-
-    fn local_raid_rank(&self) -> u8 {
-        (self.floor().earned / 8).min(2) as u8
+    pub fn reward_rarity(&self) -> u8 {
+        self.floor()
+            .sites
+            .iter()
+            .filter_map(|site| match site {
+                Some(Site::Chest { rarity }) => Some(*rarity),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     pub fn descent_blocker(&self) -> Option<&'static str> {
-        let floor = self.floor();
         if self.defeated || self.running() {
             Some("新フロアは襲撃と襲撃の間に掘れます。")
         } else if self.floors.len() >= MAX_FLOORS {
             Some("これ以上深いフロアは掘れません。")
-        } else if floor.tier < 3 || floor.earned < floor.next_goal() {
-            Some("今の階を規模3まで拡張し、その階で冒険者を20人撃退してください。")
-        } else if floor.development(self.floors.len() - 1) < FLOOR_DEVELOPMENT_GOAL {
-            Some("今の階で内壁を掘り、開発24に達すると次の階を掘れます。")
-        } else if self.gold < FLOOR_GOLD_COST || self.bones < FLOOR_BONE_COST {
-            Some("新フロアには金貨100・骨材6が必要です。")
+        } else if self.boss_level() < self.descent_level() {
+            Some("玉座で冒険者を倒し、氷の主のレベルを上げてください。")
         } else {
             None
         }
@@ -887,10 +936,19 @@ impl Game {
         if let Some(reason) = self.descent_blocker() {
             return Err(reason);
         }
-        self.gold -= FLOOR_GOLD_COST;
-        self.bones -= FLOOR_BONE_COST;
         self.active().steward = steward;
         self.floors.push(Floor::new(self.floors.len()));
+        let unlocked: Vec<_> = MONSTERS
+            .iter()
+            .filter(|monster| monster.floor == self.floors.len() && self.monster_unlocked(monster))
+            .map(|monster| monster.name)
+            .collect();
+        if !unlocked.is_empty() {
+            self.message(format!(
+                "新しい階で仲間にできる魔物：{}",
+                unlocked.join("、")
+            ));
+        }
         self.boss = self.max_boss();
         self.countdown = PREPARE;
         self.message(if steward {
@@ -926,13 +984,15 @@ impl Game {
         Ok(())
     }
 
-    fn reward(&mut self, level: u8, depth: usize, class: u8) {
+    fn reward(&mut self, level: u32, depth: usize, class: u8, rarity: u8) {
         self.kills += 1;
         let adventurer = &ADVENTURERS[class as usize];
-        let gold = 9 + 6 * level as u32 + adventurer.bounty;
+        let gold = (9 + 6 * combat_power(level) + adventurer.bounty)
+            * REWARD_PERCENT[rarity as usize]
+            / 100;
         self.gold += gold;
-        self.bones += 1 + (level >= 5) as u32;
-        self.loot += 1 + (level >= 4) as u32;
+        self.bones += 1 + u32::from(level >= 5) + u32::from(rarity >= 2);
+        self.loot += 1 + u32::from(level >= 4) + u32::from(rarity);
         self.floors[depth].earned += 1;
         self.message(format!(
             "B{}でLv.{} {}を撃退。金貨 +{}・骨材と戦利品を回収。",
@@ -943,9 +1003,9 @@ impl Game {
         ));
     }
 
-    fn raid_reward(&mut self, tally: &mut Report, level: u8, depth: usize, class: u8) {
+    fn raid_reward(&mut self, tally: &mut Report, level: u32, depth: usize, class: u8, rarity: u8) {
         let before = (self.gold, self.bones, self.loot);
-        self.reward(level, depth, class);
+        self.reward(level, depth, class, rarity);
         tally.stopped += 1;
         tally.gold += self.gold - before.0;
         tally.bones += self.bones - before.1;
@@ -983,14 +1043,14 @@ impl Game {
     }
 
     pub fn begin_raid(&mut self) {
-        if self.defeated || self.running() {
+        if self.defeated || self.running() || self.wave >= MAX_RAID_LEVEL {
             return;
         }
         let (count, best) = self.forecast();
         if count == 0 {
             return;
         }
-        let rank = self.local_raid_rank();
+        let reward_rarity = self.reward_rarity();
         self.wave += 1;
         self.paused = false;
         self.countdown = 0.0;
@@ -1015,7 +1075,7 @@ impl Game {
             let level = if leader {
                 best
             } else {
-                best.saturating_sub(1 + (index % 3) as u8).max(1 + rank)
+                best.saturating_sub(1 + (index % 3) as u32).max(1)
             };
             let class = raid_class(level, self.wave, index, leader);
             // Keep the leader and a companion on the active floor even with strong stewards.
@@ -1033,10 +1093,10 @@ impl Game {
                     bypassed += 1;
                     continue;
                 }
-                let cost = 7 + 4 * level as u32 + ADVENTURERS[class as usize].bounty;
+                let cost = 7 + 4 * combat_power(level) + ADVENTURERS[class as usize].bounty;
                 if *budget >= cost {
                     *budget -= cost;
-                    self.raid_reward(&mut tally, level, depth, class);
+                    self.raid_reward(&mut tally, level, depth, class, reward_rarity);
                     stopped += 1;
                     captured = true;
                     break;
@@ -1064,6 +1124,7 @@ impl Game {
         }
         let mut raid = Raid {
             tally,
+            reward_rarity,
             duel: None,
             boss_mp: None,
             waiting,
@@ -1082,28 +1143,21 @@ impl Game {
 
     fn chest_target(&self, index: usize) -> Option<Cell> {
         let floor = self.floor();
-        let mut chests: Vec<_> = floor
+        let count = floor.chest_count();
+        if count == 0 {
+            return None;
+        }
+        floor
             .sites
             .iter()
             .enumerate()
             .filter_map(|(i, site)| {
-                if let Some(Site::Chest { rarity }) = site {
-                    Some((
-                        *rarity,
-                        Cell {
-                            x: i % WIDTH,
-                            y: i / WIDTH,
-                        },
-                    ))
-                } else {
-                    None
-                }
+                matches!(site, Some(Site::Chest { .. })).then_some(Cell {
+                    x: i % WIDTH,
+                    y: i / WIDTH,
+                })
             })
-            .collect();
-        chests.sort_by_key(|&(rarity, cell)| (std::cmp::Reverse(rarity), cell));
-        chests
-            .get(index % chests.len().max(1))
-            .map(|&(_, cell)| cell)
+            .nth(index % count)
     }
 
     fn spawn(&self, raid: &mut Raid) {
@@ -1115,7 +1169,7 @@ impl Game {
         let route = floor
             .adventurer_route(ENTRY, chest.unwrap_or(THRONE))
             .expect("reachable destination");
-        let hp = 22 + 9 * level as i32 + ADVENTURERS[class as usize].health;
+        let hp = 26 + 5 * combat_power(level) as i32 + ADVENTURERS[class as usize].health;
         raid.invaders.push(Invader {
             level,
             hp,
@@ -1146,7 +1200,8 @@ impl Game {
         }
 
         let adventurer = &ADVENTURERS[invader.class as usize];
-        let mut retaliation = (6 + 3 * invader.level as u16 + adventurer.retaliation).div_ceil(3);
+        let mut retaliation =
+            (6 + 3 * combat_power(invader.level) as u16 + adventurer.retaliation).div_ceil(3);
         let mut damage = (monster.damage.min(8 + *hp as i32) + 1) / 2;
         if encounter.rounds == COMBAT_ROUNDS {
             match monster.tactic {
@@ -1294,6 +1349,7 @@ impl Game {
                         invader.level,
                         self.floors.len() - 1,
                         invader.class,
+                        raid.reward_rarity,
                     );
                 }
             }
@@ -1325,7 +1381,18 @@ impl Game {
             return None;
         }
         let (version, mut game): (u8, Self) = serde_json::from_slice(bytes).ok()?;
-        if game.development == missing_development() {
+        if game.boss_xp == missing_progress() {
+            let tier = game.floors.last()?.tier;
+            if !(1..=3).contains(&tier) || game.floors.len() > MAX_FLOORS {
+                return None;
+            }
+            let old_level = 1 + 2 * (game.floors.len() - 1) as u32 + u32::from(tier - 1);
+            game.boss_xp = boss_level_xp(old_level);
+            if game.boss > 0 {
+                game.boss = game.boss.checked_add(8 * (old_level - 1))?;
+            }
+        }
+        if game.development == missing_progress() {
             game.development = 0;
             if !game.valid() {
                 return None;
@@ -1357,6 +1424,7 @@ impl Game {
                 .into_iter()
                 .any(|value| value > 1_000_000_000)
             || self.development > 100_000
+            || self.boss_xp > MAX_BOSS_XP
             || self.defeated != (self.boss == 0 && self.duel().is_none())
         {
             return false;
@@ -1399,10 +1467,11 @@ impl Game {
             return false;
         }
         let Some(raid) = &self.raid else { return true };
-        let valid_level = |level: u8, class: u8| {
-            (1..=15).contains(&level) && (class as usize) < ADVENTURERS.len()
+        let valid_level = |level: u32, class: u8| {
+            (1..=MAX_RAID_LEVEL).contains(&level) && (class as usize) < ADVENTURERS.len()
         };
         !self.defeated
+            && (raid.reward_rarity as usize) < REWARD_PERCENT.len()
             && raid
                 .boss_mp
                 .is_none_or(|mp| mp <= boss_mp(self.boss_level()))
@@ -1421,8 +1490,8 @@ impl Game {
                 .all(|&(level, class)| valid_level(level, class))
             && raid.invaders.iter().all(|invader| {
                 valid_level(invader.level, invader.class)
-                    && (1..=180).contains(&invader.hp)
-                    && (invader.hp..=180).contains(&invader.max_hp)
+                    && (1..=MAX_ADVENTURER_HP).contains(&invader.hp)
+                    && (invader.hp..=MAX_ADVENTURER_HP).contains(&invader.max_hp)
                     && invader.route.get(invader.step) == Some(&invader.cell)
                     && invader.route.len() <= WIDTH * HEIGHT
                     && invader.route.iter().all(|&cell| self.floor().open(cell))

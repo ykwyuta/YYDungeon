@@ -53,14 +53,14 @@ wasm.yy_frame(0, 1);
 assert.equal(wasm.yy_can_autosave(), 1);
 assert.equal(game().wave, 0);
 assert.ok(draws > 100);
-assert.ok([...labels].some(label => label.includes("この階の開発 0/24")));
+assert.ok([...labels].some(label => label.includes("氷の主 Lv.1 (0/10 XP)　次の階 Lv.3")));
 
 wasm.yy_event(2, 51, 0); // 3 opens the monster roster.
 wasm.yy_frame(0, 1);
-assert.ok(labels.has("仲間モンスター図鑑") && labels.has("スライム"));
+assert.ok(labels.has("仲間モンスター図鑑") && [...labels].some(label => label.includes("スライム") && label.includes("D Lv.")));
 for (let i = 0; i < 3; i++) wasm.yy_event(1, 420, 671);
 wasm.yy_frame(0, 1);
-assert.ok(labels.has("深淵竜"));
+assert.ok([...labels].some(label => label.includes("深淵竜") && label.includes("S Lv.")));
 wasm.yy_event(2, 27, 0);
 wasm.yy_frame(0, 1);
 
@@ -189,10 +189,12 @@ wasm.yy_frame(0.25, 1);
 wasm.yy_frame(0.25, 1);
 assert.equal(game().last_report.stopped, 1);
 assert.equal(game().last_report.throne, 1);
+assert.ok(game().boss_xp > 0);
 
 // Both fighters get distinct charge, special, and recoil poses in the same turn.
 arenaGame.floors.push(structuredClone(arenaGame.floors[0]));
 arenaGame.floors.at(-1).tier = 2;
+arenaGame.boss_xp = 42; // Lv. 4 unlocks Storm.
 arenaGame.raid.duel = {
   class: 11, level: 7, hp: 100, max_hp: 100, mp: 9, max_mp: 9,
   boss_mp: 15, turn: 0, lines: [], outcome: null,

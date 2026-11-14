@@ -1,8 +1,8 @@
 use crate::adventurers::{strongest_class, ADVENTURERS, ADVENTURER_ART, DUEL_ADVENTURER_ART};
 use crate::duel::{boss_mp, Command, Duel};
 use crate::duel_animation::{resting_poses, Animation, Pose, TURN_TIME};
+use crate::dungeon::REWARD_PERCENT;
 use crate::dungeon::{Cell, Floor, Game, Order, Site, ENTRY, RARITIES, THRONE};
-use crate::dungeon::{FLOOR_BONE_COST, FLOOR_DEVELOPMENT_GOAL, FLOOR_GOLD_COST};
 use crate::gfx::{Bitmap, Font, Gfx};
 use crate::monsters::{GOBLIN, MONSTERS, MONSTER_ART, SENTINEL};
 
@@ -368,14 +368,6 @@ fn monster_card(index: usize) -> Rect {
     )
 }
 
-fn next_unlock(development: u32) -> Option<u32> {
-    MONSTERS
-        .iter()
-        .map(|monster| monster.unlock)
-        .filter(|&goal| goal > development)
-        .min()
-}
-
 const ADVICE: Rect = Rect::new(867.0, 27.0, 116.0, 40.0);
 const REPORT: Rect = Rect::new(989.0, 27.0, 122.0, 40.0);
 const COURT_CLOSE: Rect = Rect::new(759.0, 520.0, 175.0, 44.0);
@@ -581,7 +573,7 @@ impl Screen {
             {
                 let id = page * MONSTERS_PER_PAGE + index;
                 let monster = &MONSTERS[id];
-                if monster.unlock <= self.game.development && self.live() && !self.game.running() {
+                if self.game.monster_unlocked(monster) && self.live() && !self.game.running() {
                     self.order = Order::Recruit(id as u8);
                     self.selected = None;
                     self.overlay = None;
@@ -976,7 +968,11 @@ impl View<'_> {
         if !self.game.running() && count > 0 {
             Rect::new(448.0, 154.0, 273.0, 16.0).label(
                 g,
-                &format!("出現候補　{}", ADVENTURERS[strongest_class(level)].name),
+                &format!(
+                    "{}候補　報酬 金{}%",
+                    ADVENTURERS[strongest_class(level)].name,
+                    REWARD_PERCENT[self.game.reward_rarity() as usize],
+                ),
                 Font::Small,
                 DIM,
             );
@@ -1320,12 +1316,14 @@ impl View<'_> {
             let (price, loot) = if order == Order::Chest {
                 self.game.chest_cost(self.rarity)
             } else {
-                (order.price(), 0)
+                (order.price(), order.loot())
             };
             let cost = if order == Order::Bestiary {
                 format!("開発 {}", self.game.development)
             } else if order == Order::Remove {
                 "費用なし".into()
+            } else if matches!(order, Order::Recruit(_)) {
+                format!("{}金 {}骨 {}品", price, order.bones(), loot)
             } else if loot > 0 {
                 format!("{} 金 / {} 品", price, loot)
             } else if order.bones() > 0 {
@@ -1426,16 +1424,15 @@ impl View<'_> {
         LOG.panel(g, PANEL, EDGE);
         Rect::new(43.0, 667.0, 103.0, 23.0).label(g, "工房日誌", Font::Normal, GOLD);
         let floor = self.floor();
-        let development = floor.development(self.floor);
+        let (xp, next_xp) = self.game.boss_experience();
         Rect::new(277.0, 668.0, 536.0, 22.0).label(
             g,
             &format!(
-                "規模 {}/3　撃退 {}/{}　この階の開発 {}/{}",
+                "規模 {}/3　撃退 {}　氷の主 Lv.{} ({xp}/{next_xp} XP)　次の階 Lv.{}",
                 floor.tier,
                 floor.earned(),
-                floor.next_goal(),
-                development,
-                FLOOR_DEVELOPMENT_GOAL,
+                self.game.boss_level(),
+                self.game.descent_level(),
             ),
             Font::Small,
             TEAL,
@@ -1463,12 +1460,25 @@ impl View<'_> {
         let development = self.game.development;
         let unlocked = MONSTERS
             .iter()
-            .filter(|monster| monster.unlock <= development)
+            .filter(|monster| self.game.monster_unlocked(monster))
             .count();
-        let goal = next_unlock(development).map_or_else(
-            || "全種解放".into(),
-            |goal| format!("次の解放まで +{}", goal - development),
-        );
+        let goal = MONSTERS
+            .iter()
+            .filter(|monster| {
+                monster.floor <= self.game.floors.len() && monster.unlock > development
+            })
+            .map(|monster| monster.unlock)
+            .min()
+            .map(|target| format!("次の解放まで開発 +{}", target - development))
+            .or_else(|| {
+                MONSTERS
+                    .iter()
+                    .filter(|monster| monster.floor > self.game.floors.len())
+                    .map(|monster| monster.floor)
+                    .min()
+                    .map(|floor| format!("次のランクは地下{floor}階"))
+            })
+            .unwrap_or_else(|| "全種解放".into());
         Rect::new(161.0, 155.0, 915.0, 27.0).label(
             g,
             &format!(
@@ -1479,9 +1489,9 @@ impl View<'_> {
             GOLD,
         );
         let detail = if self.live() && !self.game.running() {
-            "通路・分岐・回り道を掘ると開発が進みます。解放済の魔物を選び、空き通路に配置してください。"
+            "迷宮開発と到達階に応じて仲間が増えます。解放済の魔物を選び、空き通路に配置してください。"
         } else {
-            "配置できるのは運営中のフロアの準備時間です。通路・分岐・回り道を掘ると仲間が増えます。"
+            "配置できるのは運営中の階の準備時間です。仲間は迷宮開発と到達階に応じて増えます。"
         };
         Rect::new(161.0, 195.0, 915.0, 24.0).label(g, detail, Font::Normal, DIM);
         for (index, monster) in MONSTERS[page * MONSTERS_PER_PAGE..][..MONSTERS_PER_PAGE]
@@ -1490,7 +1500,7 @@ impl View<'_> {
         {
             let id = page * MONSTERS_PER_PAGE + index;
             let rect = monster_card(index);
-            let unlocked = monster.unlock <= development;
+            let unlocked = self.game.monster_unlocked(monster);
             rect.panel(g, INSET, if unlocked { GOLD } else { EDGE });
             self.art.draw_monster(
                 g,
@@ -1500,7 +1510,7 @@ impl View<'_> {
             );
             Rect::new(rect.x + 82.0, rect.y + 8.0, 350.0, 25.0).label(
                 g,
-                monster.name,
+                &format!("{}　{} Lv.{}", monster.name, monster.rank, monster.level),
                 Font::Big,
                 if unlocked { TEXT } else { DIM },
             );
@@ -1510,9 +1520,9 @@ impl View<'_> {
                 monster.damage,
                 monster.hp,
                 if unlocked {
-                    format!("金貨{}・骨材{}", monster.gold, monster.bones)
+                    format!("{}金 {}骨 {}品", monster.gold, monster.bones, monster.loot)
                 } else {
-                    format!("開発{}で解放", monster.unlock)
+                    format!("地下{}階 / 開発{}", monster.floor, monster.unlock)
                 }
             );
             Rect::new(rect.x + 82.0, rect.y + 42.0, 350.0, 22.0).label(
@@ -1674,8 +1684,6 @@ impl View<'_> {
         );
         if secretary {
             let (count, level) = self.game.forecast();
-            let floor = self.game.floor();
-            let development = floor.development(self.game.floors.len() - 1);
             let (first, second) = if self.game.running() {
                 (
                     "襲撃中です。冒険者が玉座に着いたら、氷の主に戦いの指示を出してください。"
@@ -1683,9 +1691,9 @@ impl View<'_> {
                     "氷の主のMPは同じ襲撃の戦いに持ち越します。防御でもMPを回復できます。".into(),
                 )
             } else if count == 0 {
-                ("空いている通路に宝箱を置きましょう。並品なら少人数の襲撃から迎えられます。".into(), "宝箱を調べると予想経路が見えます。金貨が足りなければ、最初の並品の宝箱は工務隊が補助します。".into())
+                ("空いている通路に宝箱を置きましょう。最初は宝箱をひとつ置くと、少人数で迎えられます。".into(), "宝箱を調べると予想経路が見えます。金貨が足りなければ、最初の並品の宝箱は工務隊が補助します。".into())
             } else {
-                (format!("次は{count}人、最大Lv.{level}です。罠や魔物がいない脇道を回られないよう、岩壁で経路を調整しましょう。"), format!("この階の開発は{development}/{FLOOR_DEVELOPMENT_GOAL}です。内壁を掘って分岐や回り道を作ると、新しい仲間が加わります。"))
+                (format!("次は{count}人、最大Lv.{level}です。氷の主を育てるため、玉座まで来られる経路を残しましょう。"), format!("次の階は氷の主がLv.{}になると開きます。階を進み、迷宮を掘ると新しい仲間が加わります。", self.game.descent_level()))
             };
             Rect::new(548.0, 290.0, 375.0, 75.0).label(g, &first, Font::Normal, TEXT);
             Rect::new(548.0, 380.0, 375.0, 92.0).label(g, &second, Font::Normal, TEXT);
@@ -1738,9 +1746,9 @@ impl View<'_> {
             Rect::new(304.0, 167.0, 632.0, 51.0).label(g, "迷宮工房の遊び方", Font::TitleMid, TEXT);
             for (i, (title, detail)) in [
                 ("建設", "右の指示を選び、迷路の区画を押すとゴブリンが作業します。分岐や回り道を掘ると、図鑑から新しい魔物を配置できます。"),
-                ("おびき寄せる", "宝箱を置くと冒険者が来ます。箱が多いほど人数が増え、レアな品には強敵が来ます。開けられた箱は消えます。冒険者は罠や魔物を避けて進みます。"),
+                ("おびき寄せる", "宝箱が多いほど冒険者が増えます。強さは襲撃のたびに上がり、レアな品は撃退報酬を増やします。開けられた箱は消えます。"),
                 ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨と資材を回収します。HPは魔物が青緑、冒険者が赤です。玉座ではターン制で戦い、氷の主が倒れると陥落します。"),
-                ("拡張と委任", "撃退で迷路と配置枠が広がります。規模3、撃退20、階の開発24で次の階を掘れます。前の階を中ボスに任せられます。"),
+                ("拡張と委任", "撃退で迷路と配置枠が広がります。玉座で勝って氷の主を育てると次の階へ進めます。前の階は中ボスに任せられます。"),
             ].into_iter().enumerate() {
                 let y = 236.0 + 78.0 * i as f32;
                 Rect::new(308.0, y, 617.0, 22.0).label(g, title, Font::Normal, GOLD);
@@ -1756,7 +1764,7 @@ impl View<'_> {
         }
         Rect::new(283.0, 258.0, 674.0, 268.0).panel(g, PANEL, GOLD);
         let (title, detail) = match overlay {
-            Overlay::Descend => ("新しいフロア", format!("金貨{FLOOR_GOLD_COST}と骨材{FLOOR_BONE_COST}を使い、地下{}階を掘ります。前の階を任せると中ボスが迎撃し、Lv.{}以上の冒険者は次の階へ通します。", self.game.floors.len() + 1, self.floor().pass_level())),
+            Overlay::Descend => ("新しいフロア", format!("氷の主が必要なレベルに達しました。地下{}階を掘ります。前の階を任せると中ボスが迎撃し、Lv.{}以上の冒険者は次の階へ通します。", self.game.floors.len() + 1, self.floor().pass_level())),
             Overlay::Reset => ("最初から始める", "現在の迷宮と進行記録を消去して、地下1階から始めます。".into()),
             Overlay::Defeat => ("迷宮陥落", format!("氷の主が倒されました。第{}波・累計撃退{}人・地下{}階", self.game.wave, self.game.kills, self.game.floors.len())),
             Overlay::Help | Overlay::Bestiary(_) | Overlay::Secretary | Overlay::Butler => unreachable!(),
