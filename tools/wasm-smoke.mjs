@@ -6,6 +6,7 @@ const decoder = new TextDecoder();
 let wasm;
 let draws = 0;
 let sprites = 0;
+const spritesDrawn = [];
 const gaugeColors = new Set();
 const labels = new Set();
 const env = {
@@ -21,7 +22,10 @@ const env = {
   canvas_circle() {},
   canvas_text(ptr, len) { labels.add(decoder.decode(new Uint8Array(wasm.memory.buffer, ptr, len))); },
   canvas_bitmap() { return ++sprites; },
-  canvas_sprite(id) { assert.ok(id > 0 && id <= sprites); },
+  canvas_sprite(id, x, y, width, height) {
+    assert.ok(id > 0 && id <= sprites);
+    spritesDrawn.push({ id, x, y, width, height });
+  },
   browser_fullscreen() {},
   browser_error(ptr, len) { throw new Error(decoder.decode(new Uint8Array(wasm.memory.buffer, ptr, len))); },
 };
@@ -35,7 +39,7 @@ wasm.yy_frame(0.25, 1);
 assert.ok(labels.has("はじめる　 [Enter]"));
 assert.equal(wasm.yy_can_autosave(), 0);
 assert.equal(game().countdown, 42);
-assert.equal(sprites, 63);
+assert.equal(sprites, 75);
 wasm.yy_event(2, 112, 0);
 wasm.yy_frame(0, 1);
 assert.ok(labels.has("キャッシュを消して再読み込み"));
@@ -147,6 +151,12 @@ wasm.yy_init(1240, 780);
 wasm.yy_event(2, 13, 0);
 wasm.yy_frame(0, 1);
 assert.ok(labels.has("玉座の戦い"));
+const bossSprite = spritesDrawn.at(-2);
+const adventurerSprite = spritesDrawn.at(-1);
+assert.ok(bossSprite.x < 350 && bossSprite.y >= 225);
+assert.ok(adventurerSprite.x > 700 && adventurerSprite.y < bossSprite.y);
+assert.ok(adventurerSprite.height >= 365);
+assert.ok(adventurerSprite.y + adventurerSprite.height < bossSprite.y + bossSprite.height);
 wasm.yy_event(2, 50, 0);
 wasm.yy_frame(0, 1);
 assert.equal(game().raid.duel.outcome, "Victory");

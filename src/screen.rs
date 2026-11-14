@@ -1,4 +1,4 @@
-use crate::adventurers::{strongest_class, ADVENTURERS, ADVENTURER_ART};
+use crate::adventurers::{strongest_class, ADVENTURERS, ADVENTURER_ART, DUEL_ADVENTURER_ART};
 use crate::duel::{boss_mp, Command, Duel};
 use crate::dungeon::{Cell, Floor, Game, Order, Site, ENTRY, RARITIES, THRONE};
 use crate::dungeon::{FLOOR_BONE_COST, FLOOR_DEVELOPMENT_GOAL, FLOOR_GOLD_COST};
@@ -170,7 +170,7 @@ const SPRITES: [&[u8]; 16] = [
     include_bytes!("../assets/secretary.png"),
     include_bytes!("../assets/butler.png"),
     include_bytes!("../assets/throne-arena.jpg"),
-    include_bytes!("../assets/throne-boss.png"),
+    include_bytes!("../assets/throne-boss-back.png"),
 ];
 
 struct Art {
@@ -188,6 +188,7 @@ impl Art {
             .iter()
             .chain(MONSTER_ART.iter())
             .chain(ADVENTURER_ART[3..].iter())
+            .chain(DUEL_ADVENTURER_ART.iter())
             .map(|bytes| {
                 let rgba = image::load_from_memory(bytes).ok()?.into_rgba8();
                 let (w, h) = rgba.dimensions();
@@ -211,6 +212,11 @@ impl Art {
             SPRITES.len() + MONSTER_ART.len() + class as usize - 3
         };
         self.draw(gfx, index, rect, 1.0);
+    }
+
+    fn draw_duel_adventurer(&self, gfx: &Gfx, class: u8, rect: Rect) {
+        let index = SPRITES.len() + MONSTER_ART.len() + ADVENTURER_ART.len() - 3;
+        self.draw(gfx, index + class as usize, rect, 1.0);
     }
 
     fn draw_monster(&self, gfx: &Gfx, id: u8, rect: Rect, alpha: f32) {
@@ -1404,14 +1410,15 @@ impl View<'_> {
         self.art.draw(
             g,
             DUEL_BOSS,
-            Rect::new(170.0, 257.0, 310.0, 292.0),
+            Rect::new(42.0, 225.0, 526.0, 356.0),
             if self.game.boss > 0 { 1.0 } else { 0.35 },
         );
         self.art
-            .draw_adventurer(g, duel.class, Rect::new(771.0, 255.0, 258.0, 266.0));
-        for (x, name, hp, max_hp, mp, max_mp, color) in [
+            .draw_duel_adventurer(g, duel.class, Rect::new(717.0, 94.0, 422.0, 374.0));
+        for (x, y, name, hp, max_hp, mp, max_mp, color) in [
             (
-                55.0,
+                829.0,
+                462.0,
                 format!("氷の主　Lv.{level}"),
                 self.game.boss,
                 self.game.max_boss(),
@@ -1420,7 +1427,8 @@ impl View<'_> {
                 TEAL,
             ),
             (
-                829.0,
+                55.0,
+                102.0,
                 format!("{enemy}　Lv.{}", duel.level),
                 duel.hp,
                 duel.max_hp,
@@ -1429,16 +1437,16 @@ impl View<'_> {
                 RED,
             ),
         ] {
-            Rect::new(x, 101.0, 356.0, 104.0).panel(g, INSET, GOLD);
-            Rect::new(x + 16.0, 112.0, 320.0, 28.0).label(g, &name, Font::Big, TEXT);
+            Rect::new(x, y, 356.0, 104.0).panel(g, INSET, GOLD);
+            Rect::new(x + 16.0, y + 11.0, 320.0, 28.0).label(g, &name, Font::Big, TEXT);
             health_bar(
                 g,
-                Rect::new(x + 16.0, 147.0, 324.0, 10.0),
+                Rect::new(x + 16.0, y + 46.0, 324.0, 10.0),
                 hp as f32,
                 max_hp as f32,
                 color,
             );
-            Rect::new(x + 16.0, 169.0, 320.0, 22.0).label(
+            Rect::new(x + 16.0, y + 68.0, 320.0, 22.0).label(
                 g,
                 &format!("HP {hp}/{max_hp}　 MP {mp}/{max_mp}"),
                 Font::Normal,

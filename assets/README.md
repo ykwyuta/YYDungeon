@@ -84,3 +84,9 @@ Wide 2.1:1 raster background for retro Japanese fantasy RPG boss battle in an un
 ### 玉座の氷の主
 
 One isolated full-body combat sprite for YYDungeon, true transparent background, a powerful frost demon dungeon boss made of slate blue ice, with swept horns, angular crystalline shoulders, icy white eyes and bulky arms, three-quarter view facing right toward an enemy. Wide grounded fighting stance, hands open, painted RPG monster sprite with deep navy shadows and luminous cyan crystal edges. Crisp readable silhouette, entire body visible, no floor, no external shadows, no backdrop, no lettering. Original hand-painted Japanese fantasy game battle art.
+
+### 玉座の背面スプライト
+
+前向きの氷の主を参照し、組み込み ImageGen で背面用の画像（`assets/throne-boss-back.png`）を生成しました。冒険者12職の戦闘用画像（`assets/duel-adventurers/`）は、上記の元シートから高解像度で再出力しています。
+
+Use the reference as identity only. Create an isolated full-body REAR VIEW battle sprite for the same ice demon, the player's foreground creature viewed from behind in a classic handheld turn-based RPG, camera just behind it and slightly above. The creature faces away from camera diagonally towards the UPPER RIGHT of the frame, with its left side slightly nearer camera. Its broad BACK, rear shoulders, nape, backs of both legs and heels are visible. The eyes, face, chest, and palms are completely hidden. Preserve the original exact coherent character cues: thick faceted sapphire blue ice plates, ragged crystalline shoulder spikes, broad muscular ice demon silhouette, two big curved horns, open armored clawed hands held to sides, cyan highlights and navy-blue shadows, paint style matches reference. Show entire silhouette with feet and horns fully in frame, preserve strong detail, true transparent alpha background with generous padding; no text, no ground, no surrounding objects, no platforms, no shadows outside figure. Wide strong back and obvious rear angle are essential.

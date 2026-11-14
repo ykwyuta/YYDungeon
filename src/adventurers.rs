@@ -81,3 +81,19 @@ pub const ADVENTURER_ART: [&[u8]; ADVENTURERS.len()] = [
     include_bytes!("../assets/adventurers/10.png"),
     include_bytes!("../assets/adventurers/11.png"),
 ];
+
+#[cfg(any(windows, target_arch = "wasm32"))]
+pub const DUEL_ADVENTURER_ART: [&[u8]; ADVENTURERS.len()] = [
+    include_bytes!("../assets/duel-adventurers/00.png"),
+    include_bytes!("../assets/duel-adventurers/01.png"),
+    include_bytes!("../assets/duel-adventurers/02.png"),
+    include_bytes!("../assets/duel-adventurers/03.png"),
+    include_bytes!("../assets/duel-adventurers/04.png"),
+    include_bytes!("../assets/duel-adventurers/05.png"),
+    include_bytes!("../assets/duel-adventurers/06.png"),
+    include_bytes!("../assets/duel-adventurers/07.png"),
+    include_bytes!("../assets/duel-adventurers/08.png"),
+    include_bytes!("../assets/duel-adventurers/09.png"),
+    include_bytes!("../assets/duel-adventurers/10.png"),
+    include_bytes!("../assets/duel-adventurers/11.png"),
+];
