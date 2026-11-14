@@ -968,6 +968,26 @@ impl Game {
         )
     }
 
+    fn party_levels(count: usize, best: u32) -> impl Iterator<Item = (u32, bool)> {
+        (0..count).map(move |index| {
+            let leader = index + 1 == count;
+            let level = if leader {
+                best
+            } else {
+                best.saturating_sub(1 + (index % 3) as u32).max(1)
+            };
+            (level, leader)
+        })
+    }
+
+    pub fn forecast_classes(&self) -> impl Iterator<Item = u8> {
+        let (count, best) = self.forecast();
+        let wave = self.wave + 1;
+        Self::party_levels(count, best)
+            .enumerate()
+            .map(move |(index, (level, leader))| raid_class(level, wave, index, leader))
+    }
+
     pub fn reward_rarity(&self) -> u8 {
         self.floor()
             .sites
@@ -1134,13 +1154,7 @@ impl Game {
             .collect();
         let mut bypassed = 0;
         let mut stopped = 0;
-        for index in 0..count {
-            let leader = index + 1 == count;
-            let level = if leader {
-                best
-            } else {
-                best.saturating_sub(1 + (index % 3) as u32).max(1)
-            };
+        for (index, (level, leader)) in Self::party_levels(count, best).enumerate() {
             let class = raid_class(level, self.wave, index, leader);
             // Keep the leader and a companion on the active floor even with strong stewards.
             if index + MIN_ACTIVE_INVADERS >= count {
@@ -1283,6 +1297,10 @@ impl Game {
         }
         if monster.tactic == Tactic::Guard {
             retaliation = retaliation.div_ceil(2);
+        }
+        if monster.tactic == adventurer.weakness {
+            damage = (damage * 7 + 3) / 4;
+            retaliation = (retaliation * 2).div_ceil(3);
         }
         invader.hp -= damage;
         *hp = hp.saturating_sub(retaliation);

@@ -1,3 +1,5 @@
+use crate::monsters::Tactic;
+
 pub struct Adventurer {
     pub name: &'static str,
     pub health: i32,
@@ -5,6 +7,7 @@ pub struct Adventurer {
     pub trap_armor: i32,
     pub resist: u8,
     pub bounty: u32,
+    pub weakness: Tactic,
 }
 
 impl Adventurer {
@@ -15,6 +18,7 @@ impl Adventurer {
         trap_armor: i32,
         resist: u8,
         bounty: u32,
+        weakness: Tactic,
     ) -> Self {
         Self {
             name,
@@ -23,24 +27,25 @@ impl Adventurer {
             trap_armor,
             resist,
             bounty,
+            weakness,
         }
     }
 }
 
 // Indices 0..=2 also identify the three adventurers in old saves.
 pub const ADVENTURERS: [Adventurer; 12] = [
-    Adventurer::new("チンピラ", 0, 0, 0, 0, 0),
-    Adventurer::new("盗賊", 4, 0, 0, 0, 0),
-    Adventurer::new("猟師", 8, 0, 0, 0, 0),
-    Adventurer::new("見習い冒険者", 6, 1, 0, 0, 2),
-    Adventurer::new("傭兵", 12, 3, 0, 0, 4),
-    Adventurer::new("巡礼僧", 5, 0, 1, 1, 4),
-    Adventurer::new("騎士", 16, 3, 2, 0, 6),
-    Adventurer::new("魔術師", 4, 2, 0, 1, 6),
-    Adventurer::new("レンジャー", 10, 2, 3, 0, 7),
-    Adventurer::new("聖騎士", 20, 4, 2, 1, 9),
-    Adventurer::new("剣聖", 14, 7, 0, 0, 10),
-    Adventurer::new("勇者", 24, 5, 2, 1, 14),
+    Adventurer::new("チンピラ", 0, 0, 0, 0, 0, Tactic::Guard),
+    Adventurer::new("盗賊", 4, 0, 0, 0, 0, Tactic::Snare),
+    Adventurer::new("猟師", 8, 0, 0, 0, 0, Tactic::Ambush),
+    Adventurer::new("見習い冒険者", 6, 1, 0, 0, 2, Tactic::Ambush),
+    Adventurer::new("傭兵", 12, 3, 0, 0, 4, Tactic::Guard),
+    Adventurer::new("巡礼僧", 5, 0, 1, 1, 4, Tactic::Strike),
+    Adventurer::new("騎士", 16, 3, 2, 0, 6, Tactic::Venom),
+    Adventurer::new("魔術師", 4, 2, 0, 1, 6, Tactic::Ambush),
+    Adventurer::new("レンジャー", 10, 2, 3, 0, 7, Tactic::Snare),
+    Adventurer::new("聖騎士", 20, 4, 2, 1, 9, Tactic::Venom),
+    Adventurer::new("剣聖", 14, 7, 0, 0, 10, Tactic::Guard),
+    Adventurer::new("勇者", 24, 5, 2, 1, 14, Tactic::Strike),
 ];
 
 pub const MAX_RAID_LEVEL: u32 = 1_000_000_000;
@@ -68,7 +73,10 @@ pub fn raid_class(level: u32, wave: u32, index: usize, leader: bool) -> u8 {
     }
     let candidates = [strongest - 2, strongest - 1, strongest, 0];
     let rotation = index + (wave - 1) as usize;
-    if strongest == 2 {
+    if strongest == 11 {
+        let veterans = [9, 10, 8, 7, 11];
+        veterans[rotation % veterans.len()]
+    } else if strongest == 2 {
         (rotation % 3) as u8
     } else {
         candidates[rotation % candidates.len()] as u8

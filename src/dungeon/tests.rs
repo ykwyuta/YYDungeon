@@ -152,25 +152,37 @@ fn construction_checks_walls_resources_and_running_raids() {
 
 fn fortify(game: &mut Game, chest: Cell) {
     let route = game.floor().adventurer_route(ENTRY, chest).unwrap();
-    let monster = MONSTERS
+    let weaknesses: Vec<_> = game
+        .forecast_classes()
+        .map(|class| ADVENTURERS[class as usize].weakness)
+        .collect();
+    for (index, &cell) in route
         .iter()
+        .skip(1)
+        .take(if game.floors.len() >= 13 { 7 } else { 5 })
         .enumerate()
-        .filter(|(_, monster)| {
-            game.monster_unlocked(monster)
-                && monster.gold + 20 <= game.gold
-                && monster.bones + 2 <= game.bones
-                && monster.loot <= game.loot
-        })
-        .max_by_key(|(_, monster)| monster.damage)
-        .map(|(id, _)| id as u8)
-        .unwrap();
-    for (&cell, order) in route.iter().skip(1).take(5).zip([
-        Order::Spikes,
-        Order::Recruit(monster),
-        Order::Recruit(monster),
-        Order::Spikes,
-        Order::Recruit(monster),
-    ]) {
+    {
+        let order = if index % 2 == 0 {
+            Order::Spikes
+        } else {
+            let weakness = weaknesses[((index - 1) / 2) % weaknesses.len()];
+            let Some((id, _)) = MONSTERS
+                .iter()
+                .enumerate()
+                .filter(|(_, monster)| {
+                    game.monster_unlocked(monster)
+                        && monster.gold + 20 <= game.gold
+                        && monster.bones + 8 <= game.bones
+                        && monster.loot <= game.loot
+                })
+                .max_by_key(|(_, monster)| {
+                    monster.damage * if monster.tactic == weakness { 7 } else { 4 }
+                })
+            else {
+                continue;
+            };
+            Order::Recruit(id as u8)
+        };
         if game.floor().site(cell).is_none() && game.place(order, cell, 0).is_ok() {
             // Close shortcuts around the positions where the garrison can engage.
             for adjacent in cell
@@ -374,7 +386,7 @@ fn smaller_raids_rotate_through_each_rank_including_its_leader() {
     use crate::adventurers::strongest_class;
     for (level, expected) in [(1, 0..3), (4, 3..6), (9, 6..9), (16, 9..12)] {
         let mut encountered = [false; ADVENTURERS.len()];
-        for wave in 1..=4 {
+        for wave in 1..=5 {
             for index in 0..3 {
                 encountered[raid_class(level, wave, index, index == 2) as usize] = true;
             }
@@ -773,4 +785,54 @@ fn each_trap_type_keeps_its_level_and_price_progression_after_removal_and_reload
         assert_eq!(game.floor().site(cell).unwrap().trap_level(), Some(2));
         game.place(Order::Remove, cell, 0).unwrap();
     }
+}
+
+#[test]
+fn different_defenders_excel_against_different_professions() {
+    let mut game = Game::new();
+    game.wave = 15;
+    let expected: Vec<_> = game.forecast_classes().collect();
+    game.begin_raid();
+    let raid = game.raid.as_ref().unwrap();
+    assert_eq!(
+        expected,
+        std::iter::once(raid.invaders[0].class)
+            .chain(raid.waiting.iter().map(|&(_, class)| class))
+            .collect::<Vec<_>>()
+    );
+    assert_ne!(
+        ADVENTURERS[expected[0] as usize].weakness,
+        ADVENTURERS[expected[1] as usize].weakness
+    );
+    let template = raid.invaders[0].clone();
+    let mut exchange = |id: u8, class| {
+        let mut attacker = template.clone();
+        attacker.class = class;
+        let monster = &MONSTERS[id as usize];
+        let before = monster.hp;
+        game.active().sites[attacker.cell.index()] = Some(Site::Monster { id, hp: before });
+        game.fight(
+            &mut attacker,
+            Encounter {
+                rounds: COMBAT_ROUNDS,
+                delay: 1,
+            },
+        );
+        let after = game
+            .floor()
+            .site(attacker.cell)
+            .unwrap()
+            .monster()
+            .unwrap()
+            .1;
+        (template.hp - attacker.hp, before - after)
+    };
+    let goblin_against_hero = exchange(GOBLIN, 11);
+    let bat_against_hero = exchange(3, 11);
+    let goblin_against_mage = exchange(GOBLIN, 7);
+    let bat_against_mage = exchange(3, 7);
+    assert!(goblin_against_hero.1 < bat_against_hero.1);
+    assert!(goblin_against_hero.0 > goblin_against_mage.0);
+    assert!(bat_against_mage.0 > bat_against_hero.0);
+    assert!(bat_against_mage.1 < goblin_against_mage.1);
 }

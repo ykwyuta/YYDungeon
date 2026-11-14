@@ -1520,7 +1520,7 @@ impl View<'_> {
                 Rect::new(rect.x + 9.0, rect.y + 5.0, 66.0, 61.0),
                 if unlocked { 1.0 } else { 0.48 },
             );
-            Rect::new(rect.x + 82.0, rect.y + 8.0, 350.0, 25.0).label(
+            Rect::new(rect.x + 82.0, rect.y + 3.0, 350.0, 25.0).label(
                 g,
                 &format!("{}　{} Lv.{}", monster.name, monster.rank, monster.level),
                 Font::Big,
@@ -1537,11 +1537,23 @@ impl View<'_> {
                     format!("地下{}階 / 開発{}", monster.floor, monster.unlock)
                 }
             );
-            Rect::new(rect.x + 82.0, rect.y + 42.0, 350.0, 22.0).label(
+            Rect::new(rect.x + 82.0, rect.y + 27.0, 350.0, 20.0).label(
                 g,
                 &stats,
                 Font::Normal,
                 if unlocked { TEAL } else { DIM },
+            );
+            let targets = ADVENTURERS
+                .iter()
+                .filter(|adventurer| adventurer.weakness == monster.tactic)
+                .map(|adventurer| adventurer.name)
+                .collect::<Vec<_>>()
+                .join("・");
+            Rect::new(rect.x + 82.0, rect.y + 49.0, 356.0, 19.0).label(
+                g,
+                &format!("有利　{targets}"),
+                Font::Small,
+                GOLD,
             );
         }
         BESTIARY_BACK.button(g, "前へ", false, page > 0);
@@ -1714,6 +1726,14 @@ impl View<'_> {
         );
         if secretary {
             let (count, level) = self.game.forecast();
+            let mut tactics: Vec<_> = self
+                .game
+                .forecast_classes()
+                .map(|class| ADVENTURERS[class as usize].weakness.label())
+                .collect();
+            tactics.sort_unstable();
+            tactics.dedup();
+            let tactics = tactics.join("・");
             let (xp, next_xp) = self.game.boss_experience();
             let (first, second) = if self.game.running() {
                 ("玉座で魔王さまが勝つと経験値が入ります。防御でMPを回復し、次の戦いに備えましょう。".into(),
@@ -1724,11 +1744,11 @@ impl View<'_> {
             } else if self.game.depth_pressure() > 0 {
                 let depth = self.game.depth_pressure();
                 (
-                    format!("次は{count}人、最大Lv.{level}。深層では冒険者のHPが+{}、玉座戦の攻撃が+{}です。", depth as i32 * DEPTH_HP, depth * DEPTH_DAMAGE),
+                    format!("次は{count}人、最大Lv.{level}。深層補正はHP +{}、玉座戦の攻撃 +{}。有利な役割は{tactics}です。", depth as i32 * DEPTH_HP, depth * DEPTH_DAMAGE),
                     "宝箱を調べて進路を確認し、岩壁で抜け道をふさぎましょう。罠と仲間を通り道に置けば、玉座に着くまでに敵のHPを削れます。".into(),
                 )
             } else {
-                (format!("次は{count}人、最大Lv.{level}です。罠を設置するほど次の罠は強くなり、費用も上がります。"),
+                (format!("次は{count}人、最大Lv.{level}です。有利な役割は{tactics}です。図鑑で相手との相性を確認しましょう。"),
                  if self.game.can_descend() {
                      "次の階を掘れます。上層を氷の主に任せて、到達階と迷宮開発で仲間を増やしましょう。".into()
                  } else {
