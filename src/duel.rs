@@ -1,4 +1,6 @@
-use crate::adventurers::{combat_power, ADVENTURERS, MAX_ADVENTURER_HP, MAX_RAID_LEVEL};
+use crate::adventurers::{
+    combat_power, ADVENTURERS, DEPTH_DAMAGE, MAX_ADVENTURER_HP, MAX_RAID_LEVEL,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +43,8 @@ impl Command {
 pub struct Duel {
     pub class: u8,
     pub level: u32,
+    #[serde(default, skip_serializing_if = "zero")]
+    pub depth_pressure: u32,
     pub hp: u32,
     pub max_hp: u32,
     pub mp: u8,
@@ -71,6 +75,10 @@ pub struct Turn {
     pub enemy_move: Option<EnemyMove>,
 }
 
+fn zero(value: &u32) -> bool {
+    *value == 0
+}
+
 impl Duel {
     pub fn new(class: u8, level: u32, hp: u32, max_hp: u32, boss_level: u32) -> Self {
         let name = ADVENTURERS[class as usize].name;
@@ -82,6 +90,7 @@ impl Duel {
         Self {
             class,
             level,
+            depth_pressure: 0,
             hp,
             max_hp,
             mp,
@@ -179,6 +188,7 @@ impl Duel {
                     4 + level + u32::from(enemy.retaliation),
                 )
             };
+        damage += self.depth_pressure * DEPTH_DAMAGE;
         turn.enemy_move = Some(enemy_move);
         if command == Command::Guard {
             damage = damage.div_ceil(2);
@@ -195,10 +205,11 @@ impl Duel {
         Some(turn)
     }
 
-    pub fn valid(&self, boss_level: u32, boss_hp: u32) -> bool {
+    pub fn valid(&self, boss_level: u32, boss_hp: u32, depth_pressure: u32) -> bool {
         (self.class as usize) < ADVENTURERS.len()
             && (1..=MAX_RAID_LEVEL).contains(&self.level)
             && (1..=MAX_ADVENTURER_HP as u32).contains(&self.max_hp)
+            && self.depth_pressure <= depth_pressure
             && self.hp <= self.max_hp
             && self.mp <= self.max_mp
             && self.max_mp <= 17

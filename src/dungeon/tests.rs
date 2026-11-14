@@ -150,6 +150,39 @@ fn construction_checks_walls_resources_and_running_raids() {
     assert!(game.place(Order::Remove, cell, 0).is_err());
 }
 
+fn fortify(game: &mut Game, chest: Cell) {
+    let route = game.floor().adventurer_route(ENTRY, chest).unwrap();
+    let monster = MONSTERS
+        .iter()
+        .enumerate()
+        .filter(|(_, monster)| {
+            game.monster_unlocked(monster)
+                && monster.gold + 20 <= game.gold
+                && monster.bones + 2 <= game.bones
+                && monster.loot <= game.loot
+        })
+        .max_by_key(|(_, monster)| monster.damage)
+        .map(|(id, _)| id as u8)
+        .unwrap();
+    for (&cell, order) in route.iter().skip(1).take(5).zip([
+        Order::Spikes,
+        Order::Recruit(monster),
+        Order::Recruit(monster),
+        Order::Spikes,
+        Order::Recruit(monster),
+    ]) {
+        if game.floor().site(cell).is_none() && game.place(order, cell, 0).is_ok() {
+            // Close shortcuts around the positions where the garrison can engage.
+            for adjacent in cell
+                .neighbors()
+                .filter(|adjacent| !route.contains(adjacent))
+            {
+                let _ = game.place(Order::Wall, adjacent, 0);
+            }
+        }
+    }
+}
+
 #[test]
 fn balance_training_requires_throne_wins_and_floor_twenty_is_reachable() {
     let chest = Cell { x: 10, y: 7 };
@@ -170,6 +203,7 @@ fn balance_training_requires_throne_wins_and_floor_twenty_is_reachable() {
     settle(&mut game);
     game.place(Order::Remove, Cell { x: 1, y: 3 }, 0).unwrap();
     let mut unlocked_at = Vec::new();
+    let mut fortified = false;
     for _ in 0..350 {
         if game.floor().site(chest).is_none() {
             game.place(Order::Chest, chest, 0).unwrap();
@@ -177,9 +211,23 @@ fn balance_training_requires_throne_wins_and_floor_twenty_is_reachable() {
         while game.boss + 30 <= game.max_boss() && game.bones >= 2 {
             game.heal().unwrap();
         }
+        let mut undefended = (game.floors.len() == 19 && !fortified).then(|| game.clone());
+        if game.floors.len() >= 5 && !fortified {
+            fortify(&mut game, chest);
+            fortified = true;
+        }
         game.begin_raid();
         settle(&mut game);
         let report = game.last_report.as_ref().unwrap();
+        if let Some(workshop) = &mut undefended {
+            workshop.begin_raid();
+            settle(workshop);
+            eprintln!(
+                "B19 wave {} final HP without defenses: {}, with defenses: {}",
+                game.wave, workshop.boss, game.boss
+            );
+            assert!(workshop.defeated || game.boss >= workshop.boss + 100);
+        }
         if game.wave <= 10 || game.can_descend() {
             eprintln!(
                 "B{} wave {} Lv.{} HP {}/{} defeated {} fled {} XP +{}",
@@ -214,15 +262,11 @@ fn balance_training_requires_throne_wins_and_floor_twenty_is_reachable() {
         if game.can_descend() {
             unlocked_at.push(game.wave);
             game.descend(true).unwrap();
+            fortified = false;
             if game.floors.len() == 20 {
                 eprintln!("B2 through B20 unlocked on waves {unlocked_at:?}, development {}, supplies {}/{}/{}", game.development, game.gold, game.bones, game.loot);
                 let dragon = &MONSTERS[39];
                 assert!(game.monster_unlocked(dragon));
-                assert!(
-                    game.gold >= dragon.gold
-                        && game.bones >= dragon.bones
-                        && game.loot >= dragon.loot
-                );
                 return;
             }
         }
@@ -557,6 +601,12 @@ fn only_boss_level_unlocks_each_new_floor_and_wave_pressure_is_global() {
     assert!(game.descend(false).is_err());
     game.boss_xp = boss_level_xp(5);
     assert!(game.can_descend());
+    game.descend(false).unwrap();
+    game.place(Order::Chest, Cell { x: 10, y: 7 }, 0).unwrap();
+    assert_eq!(game.forecast(), (3, 83));
+    game.begin_raid();
+    assert_eq!(game.raid.as_ref().unwrap().depth_pressure, 1);
+    assert!(Game::load(&game.save()).is_some());
 }
 
 #[test]

@@ -1,5 +1,5 @@
 use crate::adventurers::{
-    combat_power, raid_class, ADVENTURERS, MAX_ADVENTURER_HP, MAX_RAID_LEVEL,
+    combat_power, raid_class, ADVENTURERS, DEPTH_HP, MAX_ADVENTURER_HP, MAX_RAID_LEVEL,
 };
 use crate::duel::{boss_mp, Command, Duel, Outcome, Turn};
 use crate::monsters::{Monster, Tactic, GOBLIN, MONSTERS, SENTINEL};
@@ -544,6 +544,8 @@ struct Raid {
     tally: Report,
     #[serde(default)]
     reward_rarity: u8,
+    #[serde(default)]
+    depth_pressure: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     duel: Option<Duel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -950,6 +952,11 @@ impl Game {
         Ok(())
     }
 
+    pub fn depth_pressure(&self) -> u32 {
+        // The first two floors give players time to learn construction.
+        self.floors.len().saturating_sub(2) as u32
+    }
+
     pub fn forecast(&self) -> (usize, u32) {
         let count = self.floor().chest_count();
         if count == 0 {
@@ -957,7 +964,7 @@ impl Game {
         }
         (
             (1 + 2 * count).min(RAID_MAX),
-            (self.wave + 1).min(MAX_RAID_LEVEL),
+            (self.wave + 1 + 2 * self.depth_pressure()).min(MAX_RAID_LEVEL),
         )
     }
 
@@ -1182,6 +1189,7 @@ impl Game {
         let mut raid = Raid {
             tally,
             reward_rarity,
+            depth_pressure: self.depth_pressure(),
             duel: None,
             boss_mp: None,
             waiting,
@@ -1226,7 +1234,10 @@ impl Game {
         let route = floor
             .adventurer_route(ENTRY, chest.unwrap_or(THRONE))
             .expect("reachable destination");
-        let hp = 26 + 5 * combat_power(level) as i32 + ADVENTURERS[class as usize].health;
+        let hp = 26
+            + 5 * combat_power(level) as i32
+            + DEPTH_HP * raid.depth_pressure as i32
+            + ADVENTURERS[class as usize].health;
         raid.invaders.push(Invader {
             level,
             hp,
@@ -1398,6 +1409,7 @@ impl Game {
                             invader.max_hp as u32,
                             level,
                         );
+                        duel.depth_pressure = raid.depth_pressure;
                         if let Some(mp) = raid.boss_mp {
                             duel.boss_mp = mp.min(boss_mp(level));
                         }
@@ -1553,13 +1565,14 @@ impl Game {
         };
         !self.defeated
             && (raid.reward_rarity as usize) < REWARD_PERCENT.len()
+            && raid.depth_pressure <= self.depth_pressure()
             && raid
                 .boss_mp
                 .is_none_or(|mp| mp <= boss_mp(self.boss_level()))
             && raid
                 .duel
                 .as_ref()
-                .is_none_or(|duel| duel.valid(self.boss_level(), self.boss))
+                .is_none_or(|duel| duel.valid(self.boss_level(), self.boss, raid.depth_pressure))
             && raid.waiting.len() + raid.invaders.len() <= RAID_MAX
             && (0.0..STEP).contains(&raid.clock)
             && raid.spawn < 1000

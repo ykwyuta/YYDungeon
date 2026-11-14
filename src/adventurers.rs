@@ -44,7 +44,9 @@ pub const ADVENTURERS: [Adventurer; 12] = [
 ];
 
 pub const MAX_RAID_LEVEL: u32 = 1_000_000_000;
-pub const MAX_ADVENTURER_HP: i32 = 600;
+pub const MAX_ADVENTURER_HP: i32 = 1500;
+pub const DEPTH_HP: i32 = 8;
+pub const DEPTH_DAMAGE: u32 = 2;
 
 pub fn combat_power(level: u32) -> u32 {
     level.min(12) + level.saturating_sub(12).min(240) / 4

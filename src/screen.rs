@@ -1,4 +1,6 @@
-use crate::adventurers::{strongest_class, ADVENTURERS, ADVENTURER_ART, DUEL_ADVENTURER_ART};
+use crate::adventurers::{
+    strongest_class, ADVENTURERS, ADVENTURER_ART, DEPTH_DAMAGE, DEPTH_HP, DUEL_ADVENTURER_ART,
+};
 use crate::duel::{boss_mp, Command, Duel};
 use crate::duel_animation::{resting_poses, Animation, Pose, TURN_TIME};
 use crate::dungeon::REWARD_PERCENT;
@@ -1718,7 +1720,13 @@ impl View<'_> {
                  format!("現在Lv.{}、次のレベルまで{} XPです。", self.game.boss_level(), next_xp - xp))
             } else if count == 0 {
                 ("空き通路に宝箱を置くと襲撃が再開します。箱が多いほど人数が増え、レアな品は報酬を増やします。".into(),
-                 "冒険者の強さは襲撃の波数で上がります。次は玉座まで少し通して魔王さまを育てましょう。".into())
+                 "冒険者は襲撃の波数と到達階に応じて強くなります。宝箱を置く前に、罠と仲間を通り道に配置しましょう。".into())
+            } else if self.game.depth_pressure() > 0 {
+                let depth = self.game.depth_pressure();
+                (
+                    format!("次は{count}人、最大Lv.{level}。深層では冒険者のHPが+{}、玉座戦の攻撃が+{}です。", depth as i32 * DEPTH_HP, depth * DEPTH_DAMAGE),
+                    "宝箱を調べて進路を確認し、岩壁で抜け道をふさぎましょう。罠と仲間を通り道に置けば、玉座に着くまでに敵のHPを削れます。".into(),
+                )
             } else {
                 (format!("次は{count}人、最大Lv.{level}です。罠を設置するほど次の罠は強くなり、費用も上がります。"),
                  if self.game.can_descend() {
@@ -1781,7 +1789,7 @@ impl View<'_> {
             Rect::new(304.0, 167.0, 632.0, 51.0).label(g, "迷宮工房の遊び方", Font::TitleMid, TEXT);
             for (i, (title, detail)) in [
                 ("建設", "右の指示で建設します。岩壁や設置物の撤去は金貨8です。罠は設置するほど強くなり、次の費用も上がります。"),
-                ("おびき寄せる", "宝箱が多いほど冒険者が増えます。強さは襲撃のたびに上がり、レアな品は撃退報酬を増やします。開けられた箱は消えます。"),
+                ("おびき寄せる", "宝箱が多いほど冒険者が増えます。強さは襲撃のたびに上がり、地下3階以降は深いほど強敵が来ます。レアな品は報酬を増やします。開けられた箱は消えます。"),
                 ("迎撃と回収", "襲撃は時間で始まります。撃退した冒険者から金貨と資材を回収します。HPは魔物が青緑、冒険者が赤です。玉座ではターン制で戦い、魔王が倒れると陥落します。"),
                 ("拡張と委任", "撃退で迷路と配置枠が広がります。玉座で勝って魔王を育てると次の階へ進めます。前の階は中ボスに任せられます。"),
             ].into_iter().enumerate() {
