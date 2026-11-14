@@ -1,5 +1,5 @@
 use crate::adventurers::{raid_class, ADVENTURERS};
-use crate::duel::{Command, Duel, Outcome, Turn};
+use crate::duel::{boss_mp, Command, Duel, Outcome, Turn};
 use crate::monsters::{Monster, Tactic, GOBLIN, MONSTERS, SENTINEL};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
@@ -21,6 +21,8 @@ const COMBAT_INTERVAL: u8 = 2;
 const SPIKE_DAMAGE: i32 = 7;
 const FROST_DAMAGE: i32 = 5;
 const RAID_MAX: usize = 32;
+const MIN_ACTIVE_INVADERS: usize = 2;
+const DUEL_MP_RECOVERY: u8 = 2;
 
 fn missing_development() -> u32 {
     u32::MAX
@@ -146,7 +148,7 @@ impl Order {
             Self::Spikes => "踏んだ冒険者に7ダメージを与えます。",
             Self::Frost => "5ダメージを与え、冒険者を2手止めます。",
             Self::Dig => "通路に接した内壁を掘り、迷路に新しい道を作ります。",
-            Self::Remove => "設置物を撤去して、配置枠を空けます。",
+            Self::Remove => "設置物を片付けます。宝箱以外の設置物を撤去すると金貨5を回収します。",
             Self::Wall => "空き床を岩でふさぎます。置いた岩は掘削で取り除けます。",
         }
     }
@@ -519,6 +521,8 @@ struct Raid {
     tally: Report,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     duel: Option<Duel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    boss_mp: Option<u8>,
     waiting: VecDeque<(u8, u8)>,
     pub invaders: Vec<Invader>,
     clock: f32,
@@ -642,6 +646,11 @@ impl Game {
                 return;
             }
         }
+        raid.boss_mp = Some(
+            duel.boss_mp
+                .saturating_add(DUEL_MP_RECOVERY)
+                .min(boss_mp(self.boss_level())),
+        );
         self.raid = Some(raid);
     }
 
@@ -666,8 +675,15 @@ impl Game {
         self.log.truncate(8);
     }
 
-    pub fn chest_cost(rarity: u8) -> (u32, u32) {
-        (Order::Chest.price() + 12 * rarity as u32, rarity as u32)
+    pub fn chest_cost(&self, rarity: u8) -> (u32, u32) {
+        let price = Order::Chest.price() + 12 * u32::from(rarity);
+        let gold = if rarity == 0 && self.floor().chest_count() == 0 {
+            // Keep a way to restart raids if the player has spent their last coins.
+            price.min(self.gold)
+        } else {
+            price
+        };
+        (gold, u32::from(rarity))
     }
 
     pub fn place(&mut self, order: Order, cell: Cell, rarity: u8) -> Result<(), &'static str> {
@@ -692,8 +708,12 @@ impl Game {
                 return Err("この区画に撤去できるものはありません。");
             }
             self.active().sites[cell.index()] = None;
-            self.gold += 5;
-            self.message("ゴブリンが設置物を片付けました。金貨 +5");
+            if matches!(old, Some(Site::Chest { .. })) {
+                self.message("ゴブリンが宝箱を片付けました。");
+            } else {
+                self.gold += 5;
+                self.message("ゴブリンが設置物を片付けました。金貨 +5");
+            }
             return Ok(());
         }
         if order == Order::Wall {
@@ -771,7 +791,7 @@ impl Game {
             if rarity > self.floor().rarity_limit() {
                 return Err("フロアを拡張すると、このレア度が解放されます。");
             }
-            let (gold, loot) = Self::chest_cost(rarity);
+            let (gold, loot) = self.chest_cost(rarity);
             if let Some(old_rarity) = old_rarity {
                 if rarity == old_rarity {
                     return Err("すでに同じレア度の品が入っています。");
@@ -802,6 +822,11 @@ impl Game {
         self.loot -= loot;
         if order == Order::Chest && self.floor().chest_count() == 0 {
             self.countdown = PREPARE;
+            if rarity == 0 && gold < Order::Chest.price() {
+                self.active().sites[cell.index()] = order.site(rarity);
+                self.message("工務隊が金貨の不足分を補い、並品の宝箱を置きました。");
+                return Ok(());
+            }
         }
         self.active().sites[cell.index()] = order.site(rarity);
         self.message(format!("ゴブリンが{}を配置しました。", order.name()));
@@ -821,8 +846,16 @@ impl Game {
         });
         (
             (1 + 2 * count).min(RAID_MAX),
-            1 + best * 2 + self.local_raid_rank(),
+            1 + best * 2 + self.local_raid_rank() + self.deep_treasure_rank(best),
         )
+    }
+
+    fn deep_treasure_rank(&self, rarity: u8) -> u8 {
+        if rarity >= 2 {
+            ((self.floors.len() - 1) / 2).min(3) as u8
+        } else {
+            0
+        }
     }
 
     fn local_raid_rank(&self) -> u8 {
@@ -978,15 +1011,15 @@ impl Game {
         let mut bypassed = 0;
         let mut stopped = 0;
         for index in 0..count {
-            let level = if index + 1 == count {
+            let leader = index + 1 == count;
+            let level = if leader {
                 best
             } else {
-                best.saturating_sub((index % 3) as u8).max(1 + rank)
+                best.saturating_sub(1 + (index % 3) as u8).max(1 + rank)
             };
-            let leader = index + 1 == count;
             let class = raid_class(level, self.wave, index, leader);
-            // The leader always reaches the active floor so delegating does not stall development.
-            if leader {
+            // Keep the leader and a companion on the active floor even with strong stewards.
+            if index + MIN_ACTIVE_INVADERS >= count {
                 waiting.push_back((level, class));
                 continue;
             }
@@ -1032,6 +1065,7 @@ impl Game {
         let mut raid = Raid {
             tally,
             duel: None,
+            boss_mp: None,
             waiting,
             invaders: Vec::new(),
             clock: 0.0,
@@ -1232,13 +1266,18 @@ impl Game {
                     }
                     if invader.cell == THRONE && (invader.chest.is_none() || invader.looted) {
                         raid.tally.throne += 1;
-                        raid.duel = Some(Duel::new(
+                        let level = self.boss_level();
+                        let mut duel = Duel::new(
                             invader.class,
                             invader.level,
                             invader.hp as u32,
                             invader.max_hp as u32,
-                            self.boss_level(),
-                        ));
+                            level,
+                        );
+                        if let Some(mp) = raid.boss_mp {
+                            duel.boss_mp = mp.min(boss_mp(level));
+                        }
+                        raid.duel = Some(duel);
                         break;
                     }
                     survivors.push(invader);
@@ -1360,6 +1399,9 @@ impl Game {
             (1..=15).contains(&level) && (class as usize) < ADVENTURERS.len()
         };
         !self.defeated
+            && raid
+                .boss_mp
+                .is_none_or(|mp| mp <= boss_mp(self.boss_level()))
             && raid
                 .duel
                 .as_ref()

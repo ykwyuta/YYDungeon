@@ -111,15 +111,22 @@ impl Duel {
         self.boss_mp -= command.mp();
         self.lines.clear();
         let enemy = &ADVENTURERS[self.class as usize];
+        // Floor level continues to unlock MP, with slower damage growth after Lv. 10.
+        let power = boss_level.min(10) + boss_level.saturating_sub(10) / 8;
         let damage = match command {
-            Command::Claw => (10 + 3 * boss_level).saturating_sub(enemy.trap_armor as u32),
-            Command::Frost => 16 + 4 * boss_level,
-            Command::Storm => 24 + 5 * boss_level,
+            Command::Claw => (10 + 3 * power).saturating_sub(enemy.trap_armor as u32),
+            Command::Frost => 16 + 4 * power,
+            Command::Storm => 24 + 5 * power,
             Command::Guard => 0,
         };
         if command == Command::Guard {
-            self.boss_mp = (self.boss_mp + 1).min(boss_mp(boss_level));
-            self.lines.push("氷の主は身を守り、MPを1回復した。".into());
+            let recovery = 2.min(boss_mp(boss_level) - self.boss_mp);
+            self.boss_mp += recovery;
+            self.lines.push(if recovery == 0 {
+                "氷の主は身を守った。".into()
+            } else {
+                format!("氷の主は身を守り、MPを{recovery}回復した。")
+            });
         } else {
             self.hp = self.hp.saturating_sub(damage);
             self.lines.push(format!(

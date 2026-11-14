@@ -174,6 +174,16 @@ fn a_prepared_first_floor_can_earn_and_open_the_second_floor() {
             assert_eq!(game.floors.len(), 2);
             assert!(game.floors[0].steward);
             assert!(game.kills >= 20);
+            let second_floor = game.floor();
+            let path = second_floor.adventurer_route(ENTRY, cell).unwrap();
+            let choke = path[1];
+            game.place(Order::Goblin, choke, 0).unwrap();
+            game.place(Order::Chest, cell, 0).unwrap();
+            assert_eq!(game.forecast(), (3, 1));
+            game.begin_raid();
+            settle(&mut game);
+            assert!(!game.defeated);
+            assert!(game.floor().earned() >= 1);
             return;
         }
     }
@@ -533,4 +543,60 @@ fn advanced_duelists_use_stronger_magic_and_injured_adventurers_can_flee() {
         duel.outcome == Some(Outcome::Fled)
     });
     assert!(escaped);
+}
+
+#[test]
+fn a_broke_workshop_can_reopen_without_selling_subsidized_chests_for_profit() {
+    let mut game = Game::new();
+    let chest = Cell { x: 10, y: 7 };
+    game.place(Order::Remove, chest, 0).unwrap();
+    game.gold = 0;
+    assert_eq!(game.chest_cost(0), (0, 0));
+    game.place(Order::Chest, chest, 0).unwrap();
+    assert_eq!(game.forecast(), (3, 1));
+    assert_eq!(game.chest_cost(0), (20, 0));
+    game.place(Order::Remove, chest, 0).unwrap();
+    assert_eq!(game.gold, 0);
+    assert_eq!(game.forecast(), (0, 0));
+}
+
+#[test]
+fn mp_carries_between_duels_after_saving_and_guard_recovers_it() {
+    let mut game = Game::new();
+    for site in &mut game.active().sites {
+        if !matches!(site, Some(Site::Chest { .. })) {
+            *site = None;
+        }
+    }
+    game.begin_raid();
+    for _ in 0..200 {
+        game.tick(0.25);
+        if game.duel().is_some() {
+            break;
+        }
+    }
+    let max_mp = boss_mp(game.boss_level());
+    game.duel_command(Command::Frost).unwrap();
+    if game.duel().unwrap().outcome.is_none() {
+        game.duel_command(Command::Frost).unwrap();
+    }
+    let spent = max_mp - game.duel().unwrap().boss_mp;
+    assert!(spent >= 3);
+    game.dismiss_duel();
+    game = Game::load(&game.save()).unwrap();
+    for _ in 0..200 {
+        game.tick(0.25);
+        if game.duel().is_some() {
+            break;
+        }
+    }
+    assert_eq!(
+        game.duel().unwrap().boss_mp,
+        max_mp - spent + DUEL_MP_RECOVERY
+    );
+    game.duel_command(Command::Guard).unwrap();
+    assert_eq!(
+        game.duel().unwrap().boss_mp,
+        (max_mp - spent + 4).min(max_mp)
+    );
 }

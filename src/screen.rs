@@ -1273,14 +1273,14 @@ impl View<'_> {
                 ink,
             );
             let (price, loot) = if order == Order::Chest {
-                Game::chest_cost(self.rarity)
+                self.game.chest_cost(self.rarity)
             } else {
                 (order.price(), 0)
             };
             let cost = if order == Order::Bestiary {
                 format!("開発 {}", self.game.development)
             } else if order == Order::Remove {
-                "+5 金貨".into()
+                "費用なし".into()
             } else if loot > 0 {
                 format!("{} 金 / {} 品", price, loot)
             } else if order.bones() > 0 {
@@ -1635,10 +1635,10 @@ impl View<'_> {
                 (
                     "襲撃中です。冒険者が玉座に着いたら、氷の主に戦いの指示を出してください。"
                         .into(),
-                    "襲撃が終わったら、玉座までの予想経路を確認して守りを見直しましょう。".into(),
+                    "氷の主のMPは同じ襲撃の戦いに持ち越します。防御でもMPを回復できます。".into(),
                 )
             } else if count == 0 {
-                ("空いている通路に宝箱を置きましょう。並品なら少人数の襲撃から迎えられます。".into(), "宝箱を調べると予想経路が見えます。その道の曲がり角や分岐の手前を守りましょう。".into())
+                ("空いている通路に宝箱を置きましょう。並品なら少人数の襲撃から迎えられます。".into(), "宝箱を調べると予想経路が見えます。金貨が足りなければ、最初の並品の宝箱は工務隊が補助します。".into())
             } else {
                 (format!("次は{count}人、最大Lv.{level}です。罠や魔物がいない脇道を回られないよう、岩壁で経路を調整しましょう。"), format!("この階の開発は{development}/{FLOOR_DEVELOPMENT_GOAL}です。内壁を掘って分岐や回り道を作ると、新しい仲間が加わります。"))
             };
