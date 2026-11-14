@@ -600,3 +600,30 @@ fn mp_carries_between_duels_after_saving_and_guard_recovers_it() {
         (max_mp - spent + 4).min(max_mp)
     );
 }
+
+#[test]
+fn the_throne_intercepts_adventurers_on_the_way_to_a_chest() {
+    let approach = Cell { x: 10, y: 5 };
+    let chest = Cell { x: 11, y: 6 };
+    for (step, cell) in [(0, approach), (1, THRONE)] {
+        let mut game = Game::new();
+        game.place(Order::Chest, chest, 0).unwrap();
+        game.begin_raid();
+        let raid = game.raid.as_mut().unwrap();
+        let invader = &mut raid.invaders[0];
+        invader.chest = Some(chest);
+        invader.route = vec![approach, THRONE, chest];
+        invader.step = step;
+        invader.cell = cell;
+        raid.waiting.clear();
+
+        let mut game = Game::load(&game.save()).unwrap();
+        game.tick(0.25);
+        game.tick(0.25);
+
+        assert!(game.duel().is_some());
+        assert_eq!(game.floor().site(chest), Some(Site::Chest { rarity: 0 }));
+        assert_eq!(game.raid.as_ref().unwrap().tally.throne, 1);
+        assert_eq!(game.raid.as_ref().unwrap().tally.chests, 0);
+    }
+}

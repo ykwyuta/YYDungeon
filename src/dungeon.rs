@@ -1169,6 +1169,10 @@ impl Game {
     }
 
     fn move_invader(&mut self, invader: &mut Invader) -> bool {
+        // An older save may already have a chest-bound adventurer on the throne.
+        if invader.cell == THRONE {
+            return true;
+        }
         if invader.poison > 0 {
             invader.poison -= 1;
             invader.hp -= 3;
@@ -1264,7 +1268,7 @@ impl Game {
                     if invader.looted && !was_looted {
                         raid.tally.chests += 1;
                     }
-                    if invader.cell == THRONE && (invader.chest.is_none() || invader.looted) {
+                    if invader.cell == THRONE {
                         raid.tally.throne += 1;
                         let level = self.boss_level();
                         let mut duel = Duel::new(
